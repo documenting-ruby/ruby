@@ -7315,6 +7315,62 @@ VALUE rb_mProcID_Syscall;
 /*
  *  The <code>Process</code> module is a collection of methods used to
  *  manipulate processes.
+ *
+ *  == functions
+ *
+ *  Clock functions
+ *	::clock_getres
+ *  	::clock_gettime
+ *	::times
+ *
+ *  Process initialization functions
+ *	::exec
+ *  	::fork
+ *  	::spawn
+ *
+ *  Process termination functions
+ *	::abort
+ *  	::exit
+ *  	::exit!
+ *  	::kill
+ *
+ *  Process attribute management functions
+ *	::egid
+ *  	::egid=
+ *  	::euid
+ *  	::euid=
+ *  	::getpgid
+ *  	::getpgrp
+ *  	::getpriority
+ *  	::getrlimit
+ *  	::getsid
+ *  	::pid
+ *  	::ppid
+ *  	::setpriority
+ *  	::setrlimit
+ *  	::setsid
+ *  	::uid
+ *  	::uid=
+ *
+ *  Process group management functions
+ *	::gid
+ *  	::gid=
+ *  	::groups
+ *  	::groups=
+ *  	::initgroups
+ *  	::maxgroups
+ *  	::maxgroups=
+ *  	::setpgid
+ *  	::setpgrp
+ *
+ *  ::daemon
+ *  ::detach
+ *  ::wait
+ *  ::wait2
+ *  ::waitall
+ *  ::waitpid
+ *  ::waitpid2
+ *
  */
 
 void
