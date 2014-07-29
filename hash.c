@@ -2046,19 +2046,11 @@ rb_hash_invert_i(VALUE key, VALUE value, VALUE hash)
  *     h = { "n" => 100, "m" => 100, "y" => 300, "d" => 200, "a" => 0 }
  *     h.invert   #=> {0=>"a", 100=>"m", 200=>"d", 300=>"y"}
  *
- *  Note: people usually think of a Hash as an "on-to" function: each key maps
- *  to only one value, but different keys can map to the same value.
- *
- *      { '#ff0000' => 'red', '#f00' => 'red' }
- *
- *  When you invert a hash that has multiple keys pointing to the same value,
- *  #invert will silently drop one of the keys.
+ *  Note: when you invert a hash that has multiple keys pointing to the same
+ *  value, #invert will silently drop one of the keys.
  *
  *      h = { '#ff0000' => 'red', '#f00' => 'red' }
  *      h.invert   #=> {"red"=>"#f00"}
- *
- *  You might expect it to map keys like this to an array of values, but
- *  that's not what it does.
  */
 
 static VALUE
