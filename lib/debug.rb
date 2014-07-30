@@ -902,9 +902,9 @@ EOHELP
       @stdout
     end
 
-    # Sets the IO used as stdout. Defaults to STDOUT
-    def stdout=(s)
-      @stdout = s
+    # Sets the IO used as +stdout+. Defaults to STDOUT
+    def stdout=(stdout)
+      @stdout = stdout
     end
 
     # Returns the display expression list
