@@ -11,13 +11,11 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
+#include "internal.h"
 #include "ruby/st.h"
 #include "ruby/util.h"
-#include "ruby/encoding.h"
 #include "node.h"
 #include "constant.h"
-#include "internal.h"
 #include "id.h"
 
 st_table *rb_global_tbl;
@@ -1477,23 +1475,24 @@ rb_obj_remove_instance_variable(VALUE obj, VALUE name)
     UNREACHABLE;
 }
 
-NORETURN(static void uninitialized_constant(VALUE, ID));
+NORETURN(static void uninitialized_constant(VALUE, VALUE));
 static void
-uninitialized_constant(VALUE klass, ID id)
+uninitialized_constant(VALUE klass, VALUE name)
 {
     if (klass && rb_class_real(klass) != rb_cObject)
-	rb_name_error(id, "uninitialized constant %"PRIsVALUE"::%"PRIsVALUE"",
-		      rb_class_name(klass),
-		      QUOTE_ID(id));
+	rb_name_error_str(name, "uninitialized constant %"PRIsVALUE"::% "PRIsVALUE"",
+			  rb_class_name(klass), name);
     else {
-	rb_name_error(id, "uninitialized constant %"PRIsVALUE"", QUOTE_ID(id));
+	rb_name_error_str(name, "uninitialized constant % "PRIsVALUE"", name);
     }
 }
 
-static VALUE
-const_missing(VALUE klass, ID id)
+VALUE
+rb_const_missing(VALUE klass, VALUE name)
 {
-    return rb_funcall(klass, rb_intern("const_missing"), 1, ID2SYM(id));
+    VALUE value = rb_funcallv(klass, rb_intern("const_missing"), 1, &name);
+    rb_vm_inc_const_missing_count();
+    return value;
 }
 
 
@@ -1537,7 +1536,7 @@ VALUE
 rb_mod_const_missing(VALUE klass, VALUE name)
 {
     rb_vm_pop_cfunc_frame();
-    uninitialized_constant(klass, rb_to_id(name));
+    uninitialized_constant(klass, name);
 
     UNREACHABLE;
 }
@@ -1564,7 +1563,7 @@ autoload_memsize(const void *ptr)
 static const rb_data_type_t autoload_data_type = {
     "autoload",
     {autoload_mark, autoload_free, autoload_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 #define check_autoload_table(av) \
@@ -1608,7 +1607,7 @@ autoload_i_memsize(const void *ptr)
 static const rb_data_type_t autoload_data_i_type = {
     "autoload_i",
     {autoload_i_mark, RUBY_TYPED_DEFAULT_FREE, autoload_i_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 #define check_autoload_data(av) \
@@ -1878,9 +1877,7 @@ rb_const_get_0(VALUE klass, ID id, int exclude, int recurse, int visibility)
 	goto retry;
     }
 
-    value = const_missing(klass, id);
-    rb_vm_inc_const_missing_count();
-    return value;
+    return rb_const_missing(klass, ID2SYM(id));
 }
 
 VALUE

@@ -9,10 +9,9 @@
 **********************************************************************/
 
 
-#include "ruby/ruby.h"
+#include "internal.h"
 #include "addr2line.h"
 #include "vm_core.h"
-#include "internal.h"
 #include "iseq.h"
 
 /* see vm_insnhelper.h for the values */
@@ -265,7 +264,7 @@ vm_stack_dump_each(rb_thread_t *th, rb_control_frame_t *cfp)
 	name = "<ifunc>";
     }
     else {
-	argc = iseq->argc;
+	argc = iseq->param.lead_num;
 	local_size = iseq->local_size;
 	name = RSTRING_PTR(iseq->location.label);
     }

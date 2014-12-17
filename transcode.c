@@ -9,8 +9,6 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
-#include "ruby/encoding.h"
 #include "internal.h"
 #include "transcode_data.h"
 #include <ctype.h>
@@ -2922,7 +2920,7 @@ econv_memsize(const void *ptr)
 static const rb_data_type_t econv_data_type = {
     "econv",
     {NULL, econv_free, econv_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static VALUE

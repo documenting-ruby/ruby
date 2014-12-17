@@ -9,11 +9,9 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
-#include "ruby/re.h"
-#include "ruby/encoding.h"
-#include "ruby/util.h"
 #include "internal.h"
+#include "ruby/re.h"
+#include "ruby/util.h"
 #include "regint.h"
 #include <ctype.h>
 
@@ -877,6 +875,17 @@ match_alloc(VALUE klass)
     return (VALUE)match;
 }
 
+int
+rb_reg_region_copy(struct re_registers *to, const struct re_registers *from)
+{
+    onig_region_copy(to, (OnigRegion *)from);
+    if (to->allocated) return 0;
+    rb_gc();
+    onig_region_copy(to, (OnigRegion *)from);
+    if (to->allocated) return 0;
+    return ONIGERR_MEMORY;
+}
+
 typedef struct {
     long byte_pos;
     long char_pos;
@@ -984,7 +993,8 @@ match_init_copy(VALUE obj, VALUE orig)
     RMATCH(obj)->regexp = RMATCH(orig)->regexp;
 
     rm = RMATCH(obj)->rmatch;
-    onig_region_copy(&rm->regs, RMATCH_REGS(orig));
+    if (rb_reg_region_copy(&rm->regs, RMATCH_REGS(orig)))
+	rb_memerror();
 
     if (!RMATCH(orig)->rmatch->char_offset_updated) {
         rm->char_offset_updated = 0;
@@ -997,6 +1007,7 @@ match_init_copy(VALUE obj, VALUE orig)
         MEMCPY(rm->char_offset, RMATCH(orig)->rmatch->char_offset,
                struct rmatch_offset, rm->regs.num_regs);
         rm->char_offset_updated = 1;
+	RB_GC_GUARD(orig);
     }
 
     return obj;
@@ -1471,9 +1482,11 @@ rb_reg_search0(VALUE re, VALUE str, long pos, int reverse, int set_backref_str)
     }
 
     if (NIL_P(match)) {
+	int err;
 	match = match_alloc(rb_cMatch);
-	onig_region_copy(RMATCH_REGS(match), regs);
+	err = rb_reg_region_copy(RMATCH_REGS(match), regs);
 	onig_region_free(regs, 0);
+	if (err) rb_memerror();
     }
     else {
 	if (rb_safe_level() >= 3)
@@ -2286,7 +2299,7 @@ unescape_nonascii(const char *p, const char *end, rb_encoding *enc,
                 p = p-2;
 		if (enc == rb_usascii_encoding()) {
 		    c = read_escaped_byte(&p, end, err);
-		    if (c == -1) return -1;
+		    if (c == (char)-1) return -1;
 		    rb_str_buf_cat(buf, &c, 1);
 		}
 		else {

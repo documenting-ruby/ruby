@@ -102,7 +102,7 @@ prefix or only the files that are requireable.
   end
 
   def files_in_default_gem spec
-    spec.files.sort.map do |file|
+    spec.files.map do |file|
       case file
       when /\A#{spec.bindir}\//
         [RbConfig::CONFIG['bindir'], $POSTMATCH]
@@ -146,7 +146,6 @@ prefix or only the files that are requireable.
 
   def path_description spec_dirs # :nodoc:
     if spec_dirs.empty? then
-      spec_dirs = Gem::Specification.dirs
       "default gem paths"
     else
       "specified path"

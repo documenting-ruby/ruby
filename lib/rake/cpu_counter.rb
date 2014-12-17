@@ -1,8 +1,3 @@
-require 'rbconfig'
-
-# TODO: replace with IO.popen using array-style arguments in Rake 11
-require 'open3'
-
 module Rake
 
   # Based on a script at:
@@ -17,6 +12,26 @@ module Rake
     rescue StandardError
       default
     end
+
+    begin
+      require 'etc'
+    rescue LoadError
+    else
+      if Etc.respond_to?(:nprocessors)
+        def count
+          return Etc.nprocessors
+        end
+      end
+    end
+  end
+end
+
+unless Rake::CpuCounter.method_defined?(:count)
+  Rake::CpuCounter.class_eval <<-'end;', __FILE__, __LINE__+1
+    require 'rbconfig'
+
+    # TODO: replace with IO.popen using array-style arguments in Rake 11
+    require 'open3'
 
     def count
       if defined?(Java::Java)
@@ -106,5 +121,5 @@ module Rake
         out.eof? ? nil : command
       end
     end
-  end
+  end;
 end

@@ -9,7 +9,6 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
 #include "internal.h"
 #include "vm_core.h"
 #include "gc.h"
@@ -414,7 +413,7 @@ cont_save_machine_stack(rb_thread_t *th, rb_context_t *cont)
 static const rb_data_type_t cont_data_type = {
     "continuation",
     {cont_mark, cont_free, cont_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static inline void
@@ -460,6 +459,8 @@ cont_init(rb_context_t *cont, rb_thread_t *th)
     cont->saved_thread.machine.stack_maxsize = th->machine.stack_maxsize;
     cont->saved_thread.fiber = th->fiber;
     cont->saved_thread.local_storage = 0;
+    cont->saved_thread.local_storage_recursive_hash = Qnil;
+    cont->saved_thread.local_storage_recursive_hash_for_trace = Qnil;
 }
 
 static rb_context_t *
@@ -564,6 +565,8 @@ cont_restore_thread(rb_context_t *cont)
 	th->stack = sth->stack;
 	th->stack_size = sth->stack_size;
 	th->local_storage = sth->local_storage;
+	th->local_storage_recursive_hash = sth->local_storage_recursive_hash;
+	th->local_storage_recursive_hash_for_trace = sth->local_storage_recursive_hash_for_trace;
 	th->fiber = (rb_fiber_t*)cont;
     }
 
@@ -1142,7 +1145,7 @@ rb_cont_call(int argc, VALUE *argv, VALUE contval)
 static const rb_data_type_t fiber_data_type = {
     "fiber",
     {fiber_mark, fiber_free, fiber_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static VALUE
@@ -1209,6 +1212,8 @@ fiber_init(VALUE fibval, VALUE proc)
     th->cfp->me = 0;
     th->tag = 0;
     th->local_storage = st_init_numtable();
+    th->local_storage_recursive_hash = Qnil;
+    th->local_storage_recursive_hash_for_trace = Qnil;
 
     th->first_proc = proc;
 

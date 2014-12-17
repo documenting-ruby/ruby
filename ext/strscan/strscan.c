@@ -191,7 +191,7 @@ strscan_memsize(const void *ptr)
 static const rb_data_type_t strscanner_type = {
     "StringScanner",
     {strscan_mark, strscan_free, strscan_memsize},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static VALUE
@@ -251,7 +251,9 @@ strscan_init_copy(VALUE vself, VALUE vorig)
 	self->str = orig->str;
 	self->prev = orig->prev;
 	self->curr = orig->curr;
-	onig_region_copy(&self->regs, &orig->regs);
+	if (rb_reg_region_copy(&self->regs, &orig->regs))
+	    rb_memerror();
+	RB_GC_GUARD(vorig);
     }
 
     return vself;

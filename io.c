@@ -11,11 +11,10 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
+#include "internal.h"
 #include "ruby/io.h"
 #include "ruby/thread.h"
 #include "dln.h"
-#include "internal.h"
 #include "id.h"
 #include <ctype.h>
 #include <errno.h>
@@ -153,9 +152,6 @@ VALUE rb_eEOFError;
 VALUE rb_eIOError;
 VALUE rb_mWaitReadable;
 VALUE rb_mWaitWritable;
-extern VALUE rb_eEAGAIN;
-extern VALUE rb_eEWOULDBLOCK;
-extern VALUE rb_eEINPROGRESS;
 
 static VALUE rb_eEAGAINWaitReadable;
 static VALUE rb_eEAGAINWaitWritable;
@@ -175,7 +171,8 @@ VALUE rb_default_rs;
 
 static VALUE argf;
 
-static ID id_write, id_read, id_getc, id_flush, id_readpartial, id_set_encoding, id_exception;
+#define id_exception idException
+static ID id_write, id_read, id_getc, id_flush, id_readpartial, id_set_encoding;
 static VALUE sym_mode, sym_perm, sym_extenc, sym_intenc, sym_encoding, sym_open_args;
 static VALUE sym_textmode, sym_binmode, sym_autoclose;
 static VALUE sym_SET, sym_CUR, sym_END;
@@ -909,29 +906,6 @@ io_alloc(VALUE klass)
 #   define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
 #endif
 
-static int
-wsplit_p(rb_io_t *fptr)
-{
-#if defined(HAVE_FCNTL) && defined(F_GETFL) && defined(O_NONBLOCK)
-    int r;
-#endif
-
-    if (!(fptr->mode & FMODE_WSPLIT_INITIALIZED)) {
-        struct stat buf;
-        if (fstat(fptr->fd, &buf) == 0 &&
-            !S_ISREG(buf.st_mode)
-#if defined(HAVE_FCNTL) && defined(F_GETFL) && defined(O_NONBLOCK)
-            && (r = fcntl(fptr->fd, F_GETFL)) != -1 &&
-            !(r & O_NONBLOCK)
-#endif
-            ) {
-            fptr->mode |= FMODE_WSPLIT;
-        }
-        fptr->mode |= FMODE_WSPLIT_INITIALIZED;
-    }
-    return fptr->mode & FMODE_WSPLIT;
-}
-
 struct io_internal_read_struct {
     int fd;
     void *buf;
@@ -1029,22 +1003,11 @@ rb_writev_internal(int fd, const struct iovec *iov, int iovcnt)
 }
 #endif
 
-static long
-io_writable_length(rb_io_t *fptr, long l)
-{
-    if (PIPE_BUF < l &&
-        !rb_thread_alone() &&
-        wsplit_p(fptr)) {
-        l = PIPE_BUF;
-    }
-    return l;
-}
-
 static VALUE
 io_flush_buffer_sync(void *arg)
 {
     rb_io_t *fptr = arg;
-    long l = io_writable_length(fptr, fptr->wbuf.len);
+    long l = fptr->wbuf.len;
     ssize_t r = write(fptr->fd, fptr->wbuf.ptr+fptr->wbuf.off, (size_t)l);
 
     if (fptr->wbuf.len <= r) {
@@ -1276,6 +1239,9 @@ io_binwrite_string(VALUE arg)
 
 	r = rb_writev_internal(fptr->fd, iov, 2);
 
+        if (r == -1)
+            return -1;
+
 	if (fptr->wbuf.len <= r) {
 	    r -= fptr->wbuf.len;
 	    fptr->wbuf.off = 0;
@@ -1288,8 +1254,7 @@ io_binwrite_string(VALUE arg)
 	}
     }
     else {
-	long l = io_writable_length(fptr, p->length);
-	r = rb_write_internal(fptr->fd, p->ptr, l);
+	r = rb_write_internal(fptr->fd, p->ptr, p->length);
     }
 
     return r;
@@ -1323,8 +1288,7 @@ io_binwrite_string(VALUE arg)
     if (fptr->stdio_file != stderr && !rb_thread_fd_writable(fptr->fd))
 	rb_io_check_closed(fptr);
 
-    l = io_writable_length(p->fptr, p->length);
-    return rb_write_internal(p->fptr->fd, p->ptr, l);
+    return rb_write_internal(p->fptr->fd, p->ptr, p->length);
 }
 #endif
 
@@ -2471,6 +2435,11 @@ read_all(rb_io_t *fptr, long siz, VALUE str)
 void
 rb_io_set_nonblock(rb_io_t *fptr)
 {
+#ifdef _WIN32
+    if (rb_w32_set_nonblock(fptr->fd) != 0) {
+	rb_sys_fail_path(fptr->pathv);
+    }
+#else
     int oflags;
 #ifdef F_GETFL
     oflags = fcntl(fptr->fd, F_GETFL);
@@ -2486,6 +2455,7 @@ rb_io_set_nonblock(rb_io_t *fptr)
             rb_sys_fail_path(fptr->pathv);
         }
     }
+#endif
 }
 
 void
@@ -2835,7 +2805,7 @@ rb_io_write_nonblock(int argc, VALUE *argv, VALUE io)
  *  <i>length</i> must be a non-negative integer or <code>nil</code>.
  *
  *  If <i>length</i> is a positive integer,
- *  it try to read <i>length</i> bytes without any conversion (binary mode).
+ *  it tries to read <i>length</i> bytes without any conversion (binary mode).
  *  It returns <code>nil</code> or a string whose length is 1 to <i>length</i> bytes.
  *  <code>nil</code> means it met EOF at beginning.
  *  The 1 to <i>length</i>-1 bytes string means it met EOF after reading the result.
@@ -4388,8 +4358,6 @@ rb_io_fptr_finalize(rb_io_t *fptr)
     return 1;
 }
 
-size_t rb_econv_memsize(rb_econv_t *);
-
 RUBY_FUNC_EXPORTED size_t
 rb_io_memsize(const rb_io_t *fptr)
 {
@@ -4755,8 +4723,6 @@ rb_io_sysread(int argc, VALUE *argv, VALUE io)
     if (READ_DATA_BUFFERED(fptr)) {
 	rb_raise(rb_eIOError, "sysread for buffered IO");
     }
-
-    n = fptr->fd;
 
     /*
      * FIXME: removing rb_thread_wait_fd() here changes sysread semantics
@@ -6235,7 +6201,7 @@ pipe_open_s(VALUE prog, const char *modestr, int fmode, convconfig_t *convconfig
  *  If a block is given, Ruby will run the command as a child connected
  *  to Ruby with a pipe. Ruby's end of the pipe will be passed as a
  *  parameter to the block.
- *  At the end of block, Ruby close the pipe and sets <code>$?</code>.
+ *  At the end of block, Ruby closes the pipe and sets <code>$?</code>.
  *  In this case <code>IO.popen</code> returns
  *  the value of the block.
  *
@@ -7294,6 +7260,11 @@ rb_write_error_str(VALUE mesg)
     /* a stopgap measure for the time being */
     if (rb_stderr == orig_stderr || RFILE(orig_stderr)->fptr->fd < 0) {
 	size_t len = (size_t)RSTRING_LEN(mesg);
+#ifdef _WIN32
+	if (isatty(fileno(stderr))) {
+	    if (rb_w32_write_console(mesg, fileno(stderr)) > 0) return;
+	}
+#endif
 	if (fwrite(RSTRING_PTR(mesg), sizeof(char), len, stderr) < len) {
 	    RB_GC_GUARD(mesg);
 	    return;
@@ -7309,9 +7280,9 @@ static void
 must_respond_to(ID mid, VALUE val, ID id)
 {
     if (!rb_respond_to(val, mid)) {
-	rb_raise(rb_eTypeError, "%s must have %s method, %s given",
-		 rb_id2name(id), rb_id2name(mid),
-		 rb_obj_classname(val));
+	rb_raise(rb_eTypeError, "%"PRIsVALUE" must have %"PRIsVALUE" method, %"PRIsVALUE" given",
+		 rb_id2str(id), rb_id2str(mid),
+		 rb_obj_class(val));
     }
 }
 
@@ -7787,7 +7758,7 @@ argf_memsize(const void *ptr)
 static const rb_data_type_t argf_type = {
     "ARGF",
     {argf_mark, argf_free, argf_memsize},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static inline void
@@ -9241,16 +9212,6 @@ rb_fcntl(VALUE io, VALUE req, VALUE arg)
 	if (RSTRING_PTR(arg)[RSTRING_LEN(arg)-1] != 17)
 	    rb_raise(rb_eArgError, "return value overflowed string");
 	RSTRING_PTR(arg)[RSTRING_LEN(arg)-1] = '\0';
-    }
-
-    if (cmd == F_SETFL) {
-	if (narg & O_NONBLOCK) {
-	    fptr->mode |= FMODE_WSPLIT_INITIALIZED;
-	    fptr->mode &= ~FMODE_WSPLIT;
-	}
-	else {
-	    fptr->mode &= ~(FMODE_WSPLIT_INITIALIZED|FMODE_WSPLIT);
-	}
     }
 
     return INT2NUM(retval);
@@ -12332,7 +12293,7 @@ Init_IO(void)
 
 #if 0
     /* Hack to get rdoc to regard ARGF as a class: */
-    rb_cARGF = rb_define_class("ARGF", rb_cObject);
+    rb_cARGF = rb_define_class("ARGF.class", rb_cObject);
 #endif
 
     rb_cARGF = rb_class_new(rb_cObject);
@@ -12455,5 +12416,4 @@ Init_IO(void)
 #ifdef SEEK_HOLE
     sym_HOLE = ID2SYM(rb_intern("HOLE"));
 #endif
-    id_exception = rb_intern("exception");
 }

@@ -11,11 +11,9 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
+#include "internal.h"
 #include "ruby/st.h"
 #include "ruby/util.h"
-#include "ruby/encoding.h"
-#include "internal.h"
 #include <errno.h>
 #include "probes.h"
 #include "id.h"
@@ -173,7 +171,6 @@ static const struct st_hash_type objhash = {
     rb_any_hash,
 };
 
-extern const struct st_hash_type st_hashtype_num;
 #define identhash st_hashtype_num
 
 typedef int st_foreach_func(st_data_t, st_data_t, st_data_t);
@@ -901,7 +898,7 @@ rb_hash_default_proc(VALUE hash)
  *     h["cat"]   #=> "catcat"
  */
 
-static VALUE
+VALUE
 rb_hash_set_default_proc(VALUE hash, VALUE proc)
 {
     VALUE b;
@@ -972,8 +969,8 @@ rb_hash_index(VALUE hash, VALUE value)
     return rb_hash_key(hash, value);
 }
 
-static VALUE
-rb_hash_delete_key(VALUE hash, VALUE key)
+VALUE
+rb_hash_delete(VALUE hash, VALUE key)
 {
     st_data_t ktmp = (st_data_t)key, val;
 
@@ -1008,13 +1005,13 @@ rb_hash_delete_key(VALUE hash, VALUE key)
  *
  */
 
-VALUE
-rb_hash_delete(VALUE hash, VALUE key)
+static VALUE
+rb_hash_delete_m(VALUE hash, VALUE key)
 {
     VALUE val;
 
     rb_hash_modify_check(hash);
-    val = rb_hash_delete_key(hash, key);
+    val = rb_hash_delete(hash, key);
     if (val != Qundef) return val;
     if (rb_block_given_p()) {
 	return rb_yield(key);
@@ -1066,7 +1063,7 @@ rb_hash_shift(VALUE hash)
 	else {
 	    rb_hash_foreach(hash, shift_i_safe, (VALUE)&var);
 	    if (var.key != Qundef) {
-		rb_hash_delete_key(hash, var.key);
+		rb_hash_delete(hash, var.key);
 		return rb_assoc_new(var.key, var.val);
 	    }
 	}
@@ -1854,7 +1851,7 @@ rb_hash_values(VALUE hash)
  *
  */
 
-static VALUE
+VALUE
 rb_hash_has_key(VALUE hash, VALUE key)
 {
     if (!RHASH(hash)->ntbl)
@@ -3881,7 +3878,7 @@ Init_Hash(void)
     rb_define_method(rb_cHash,"values_at", rb_hash_values_at, -1);
 
     rb_define_method(rb_cHash,"shift", rb_hash_shift, 0);
-    rb_define_method(rb_cHash,"delete", rb_hash_delete, 1);
+    rb_define_method(rb_cHash,"delete", rb_hash_delete_m, 1);
     rb_define_method(rb_cHash,"delete_if", rb_hash_delete_if, 0);
     rb_define_method(rb_cHash,"keep_if", rb_hash_keep_if, 0);
     rb_define_method(rb_cHash,"select", rb_hash_select, 0);

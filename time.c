@@ -9,12 +9,10 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
+#include "internal.h"
 #include <sys/types.h>
 #include <time.h>
 #include <errno.h>
-#include "ruby/encoding.h"
-#include "internal.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -1798,7 +1796,7 @@ time_memsize(const void *tobj)
 static const rb_data_type_t time_data_type = {
     "time",
     {time_mark, RUBY_TYPED_DEFAULT_FREE, time_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static VALUE
@@ -1887,13 +1885,6 @@ timew2timespec_exact(wideval_t timew, struct timespec *ts)
     ts->tv_nsec = NUM2LONG(nsecv);
     return ts;
 }
-
-/*
- *  Document-method: now
- *
- *  Alias for Time::new. Returns a Time object
- *  initialized to the current system time.
- */
 
 static VALUE
 time_init_0(VALUE time)
@@ -2450,6 +2441,7 @@ rb_time_timespec(VALUE time)
  *     Time.now -> time
  *
  *  Creates a new Time object for the current time.
+ *  This is same as Time.new without arguments.
  *
  *     Time.now            #=> 2009-06-24 12:39:54 +0900
  */
@@ -2789,56 +2781,56 @@ find_time_t(struct tm *tptr, int utc_p, time_t *tp)
 
     tm0 = *tptr;
     if (tm0.tm_mon < 0) {
-      tm0.tm_mon = 0;
-      tm0.tm_mday = 1;
-      tm0.tm_hour = 0;
-      tm0.tm_min = 0;
-      tm0.tm_sec = 0;
+	tm0.tm_mon = 0;
+	tm0.tm_mday = 1;
+	tm0.tm_hour = 0;
+	tm0.tm_min = 0;
+	tm0.tm_sec = 0;
     }
     else if (11 < tm0.tm_mon) {
-      tm0.tm_mon = 11;
-      tm0.tm_mday = 31;
-      tm0.tm_hour = 23;
-      tm0.tm_min = 59;
-      tm0.tm_sec = 60;
+	tm0.tm_mon = 11;
+	tm0.tm_mday = 31;
+	tm0.tm_hour = 23;
+	tm0.tm_min = 59;
+	tm0.tm_sec = 60;
     }
     else if (tm0.tm_mday < 1) {
-      tm0.tm_mday = 1;
-      tm0.tm_hour = 0;
-      tm0.tm_min = 0;
-      tm0.tm_sec = 0;
+	tm0.tm_mday = 1;
+	tm0.tm_hour = 0;
+	tm0.tm_min = 0;
+	tm0.tm_sec = 0;
     }
     else if ((d = (leap_year_p(1900 + tm0.tm_year) ?
                    leap_year_days_in_month :
 		   common_year_days_in_month)[tm0.tm_mon]) < tm0.tm_mday) {
-      tm0.tm_mday = d;
-      tm0.tm_hour = 23;
-      tm0.tm_min = 59;
-      tm0.tm_sec = 60;
+	tm0.tm_mday = d;
+	tm0.tm_hour = 23;
+	tm0.tm_min = 59;
+	tm0.tm_sec = 60;
     }
     else if (tm0.tm_hour < 0) {
-      tm0.tm_hour = 0;
-      tm0.tm_min = 0;
-      tm0.tm_sec = 0;
+	tm0.tm_hour = 0;
+	tm0.tm_min = 0;
+	tm0.tm_sec = 0;
     }
     else if (23 < tm0.tm_hour) {
-      tm0.tm_hour = 23;
-      tm0.tm_min = 59;
-      tm0.tm_sec = 60;
+	tm0.tm_hour = 23;
+	tm0.tm_min = 59;
+	tm0.tm_sec = 60;
     }
     else if (tm0.tm_min < 0) {
-      tm0.tm_min = 0;
-      tm0.tm_sec = 0;
+	tm0.tm_min = 0;
+	tm0.tm_sec = 0;
     }
     else if (59 < tm0.tm_min) {
-      tm0.tm_min = 59;
-      tm0.tm_sec = 60;
+	tm0.tm_min = 59;
+	tm0.tm_sec = 60;
     }
     else if (tm0.tm_sec < 0) {
-      tm0.tm_sec = 0;
+	tm0.tm_sec = 0;
     }
     else if (60 < tm0.tm_sec) {
-      tm0.tm_sec = 60;
+	tm0.tm_sec = 60;
     }
 
     DEBUG_REPORT_GUESSRANGE;
@@ -3093,7 +3085,7 @@ time_utc_or_local(int argc, VALUE *argv, int utc_p, VALUE klass)
  *    Time.utc(year, month, day, hour, min) -> time
  *    Time.utc(year, month, day, hour, min, sec_with_frac) -> time
  *    Time.utc(year, month, day, hour, min, sec, usec_with_frac) -> time
- *    Time.utc(sec, min, hour, day, month, year, wday, yday, isdst, tz) -> time
+ *    Time.utc(sec, min, hour, day, month, year, dummy, dummy, dummy, dummy) -> time
  *    Time.gm(year) -> time
  *    Time.gm(year, month) -> time
  *    Time.gm(year, month, day) -> time
@@ -3101,7 +3093,7 @@ time_utc_or_local(int argc, VALUE *argv, int utc_p, VALUE klass)
  *    Time.gm(year, month, day, hour, min) -> time
  *    Time.gm(year, month, day, hour, min, sec_with_frac) -> time
  *    Time.gm(year, month, day, hour, min, sec, usec_with_frac) -> time
- *    Time.gm(sec, min, hour, day, month, year, wday, yday, isdst, tz) -> time
+ *    Time.gm(sec, min, hour, day, month, year, dummy, dummy, dummy, dummy) -> time
  *
  *  Creates a Time object based on given values, interpreted as UTC (GMT). The
  *  year must be specified. Other values default to the minimum value
@@ -3131,7 +3123,7 @@ time_s_mkutc(int argc, VALUE *argv, VALUE klass)
  *   Time.local(year, month, day, hour, min) -> time
  *   Time.local(year, month, day, hour, min, sec_with_frac) -> time
  *   Time.local(year, month, day, hour, min, sec, usec_with_frac) -> time
- *   Time.local(sec, min, hour, day, month, year, wday, yday, isdst, tz) -> time
+ *   Time.local(sec, min, hour, day, month, year, dummy, dummy, isdst, dummy) -> time
  *   Time.mktime(year) -> time
  *   Time.mktime(year, month) -> time
  *   Time.mktime(year, month, day) -> time
@@ -3139,7 +3131,7 @@ time_s_mkutc(int argc, VALUE *argv, VALUE klass)
  *   Time.mktime(year, month, day, hour, min) -> time
  *   Time.mktime(year, month, day, hour, min, sec_with_frac) -> time
  *   Time.mktime(year, month, day, hour, min, sec, usec_with_frac) -> time
- *   Time.mktime(sec, min, hour, day, month, year, wday, yday, isdst, tz) -> time
+ *   Time.mktime(sec, min, hour, day, month, year, dummy, dummy, isdst, dummy) -> time
  *
  *  Same as Time::gm, but interprets the values in the
  *  local time zone.

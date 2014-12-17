@@ -59,7 +59,6 @@ The original copyright notice follows.
    email: matumoto@math.keio.ac.jp
 */
 
-#include "ruby/ruby.h"
 #include "internal.h"
 
 #include <limits.h>
@@ -335,7 +334,7 @@ static const rb_data_type_t random_data_type = {
 	random_free,
 	random_memsize,
     },
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static rb_random_t *

@@ -4,8 +4,6 @@ require 'test/unit'
 require 'tmpdir'
 require 'tempfile'
 
-require_relative 'envutil'
-
 class TestRubyOptions < Test::Unit::TestCase
   def write_file(filename, content)
     File.open(filename, "w") {|f|
@@ -589,6 +587,10 @@ class TestRubyOptions < Test::Unit::TestCase
                         nil,
                         opts)
     end
+    if signo = status.termsig
+      sleep 0.1
+      EnvUtil.diagnostic_reports(Signal.signame(signo), EnvUtil.rubybin, status.pid, Time.now)
+    end
     assert_not_predicate(status, :success?, "segv but success #{bug7402}")
   end
 
@@ -696,6 +698,42 @@ class TestRubyOptions < Test::Unit::TestCase
     end
   end
 
+  if /mswin|mingw/ =~ RUBY_PLATFORM
+    def test_command_line_glob_nonascii
+      bug10555 = '[ruby-dev:48752] [Bug #10555]'
+      name = "\u{3042}.txt"
+      expected = name.encode("locale") rescue "?.txt"
+      with_tmpchdir do |dir|
+        open(name, "w") {}
+        assert_in_out_err(["-e", "puts ARGV", "?.txt"], "", [expected], [],
+                          bug10555, encoding: "locale")
+      end
+    end
+
+    def test_command_line_progname_nonascii
+      bug10555 = '[ruby-dev:48752] [Bug #10555]'
+      name = "\u{3042}.rb"
+      expected = name.encode("locale") rescue "?.rb"
+      with_tmpchdir do |dir|
+        open(name, "w") {|f| f.puts "puts File.basename($0)"}
+        assert_in_out_err([name], "", [expected], [],
+                          bug10555, encoding: "locale")
+      end
+    end
+  end
+
+  if /mswin|mingw/ =~ RUBY_PLATFORM
+    Ougai = %W[\u{68ee}O\u{5916}.txt \u{68ee 9d0e 5916}.txt \u{68ee 9dd7 5916}.txt]
+    def test_command_line_glob_noncodepage
+      with_tmpchdir do |dir|
+        Ougai.each {|f| open(f, "w") {}}
+        assert_in_out_err(["-Eutf-8", "-e", "puts ARGV", "*"], "", Ougai, encoding: "utf-8")
+        ougai = Ougai.map {|f| f.encode("locale", replace: "?")}
+        assert_in_out_err(["-e", "puts ARGV", "*.txt"], "", ougai)
+      end
+    end
+  end
+
   def test_script_is_directory
     feature2408 = '[ruby-core:26925]'
     assert_in_out_err(%w[.], "", [], /Is a directory -- \./, feature2408)
@@ -709,5 +747,42 @@ class TestRubyOptions < Test::Unit::TestCase
   def test_pflag_sub
     bug7157 = '[ruby-core:47967]'
     assert_in_out_err(['-p', '-e', 'sub(/t.*/){"TEST"}'], %[test], %w[TEST], [], bug7157)
+  end
+
+  def assert_norun_with_rflag(opt)
+    bug10435 = "[ruby-dev:48712] [Bug #10435]: should not run with #{opt} option"
+    stderr = []
+    Tempfile.create(%w"bug10435- .rb") do |script|
+      dir, base = File.split(script.path)
+      script.puts "abort ':run'"
+      script.close
+      opts = ['-C', dir, '-r', "./#{base}", opt]
+      assert_in_out_err([*opts, '-ep']) do |_, e|
+        stderr.concat(e)
+      end
+      stderr << "---"
+      assert_in_out_err([*opts, base]) do |_, e|
+        stderr.concat(e)
+      end
+    end
+    assert_not_include(stderr, ":run", bug10435)
+  end
+
+  def test_dump_syntax_with_rflag
+    assert_norun_with_rflag('-c')
+    assert_norun_with_rflag('--dump=syntax')
+  end
+
+  def test_dump_yydebug_with_rflag
+    assert_norun_with_rflag('-y')
+    assert_norun_with_rflag('--dump=yydebug')
+  end
+
+  def test_dump_parsetree_with_rflag
+    assert_norun_with_rflag('--dump=parsetree')
+  end
+
+  def test_dump_insns_with_rflag
+    assert_norun_with_rflag('--dump=insns')
   end
 end

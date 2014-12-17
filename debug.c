@@ -115,7 +115,7 @@ ID
 ruby_debug_print_id(int level, int debug_level, const char *header, ID id)
 {
     if (level < debug_level) {
-	fprintf(stderr, "DBG> %s: %s\n", header, rb_id2name(id));
+	fprintf(stderr, "DBG> %s: %"PRIsVALUE"\n", header, rb_id2str(id));
 	fflush(stderr);
     }
     return id;
@@ -140,18 +140,20 @@ ruby_debug_breakpoint(void)
 static void
 set_debug_option(const char *str, int len, void *arg)
 {
-#define SET_WHEN(name, var) do {	    \
+#if defined _WIN32 && RUBY_MSVCRT_VERSION >= 80
+    extern int ruby_w32_rtc_error;
+#endif
+#define SET_WHEN(name, var, val) do {	    \
 	if (len == sizeof(name) - 1 &&	    \
 	    strncmp(str, (name), len) == 0) { \
-	    extern int var;	    \
-	    var = 1;		    \
+	    (var) = (val);		    \
 	    return;			    \
 	}				    \
     } while (0)
-    SET_WHEN("gc_stress", *ruby_initial_gc_stress_ptr);
-    SET_WHEN("core", ruby_enable_coredump);
-#if defined _WIN32 && defined _MSC_VER && _MSC_VER >= 1400
-    SET_WHEN("rtc_error", ruby_w32_rtc_error);
+    SET_WHEN("gc_stress", *ruby_initial_gc_stress_ptr, Qtrue);
+    SET_WHEN("core", ruby_enable_coredump, 1);
+#if defined _WIN32 && RUBY_MSVCRT_VERSION >= 80
+    SET_WHEN("rtc_error", ruby_w32_rtc_error, 1);
 #endif
     fprintf(stderr, "unexpected debug option: %.*s\n", len, str);
 }

@@ -11,11 +11,9 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
+#include "internal.h"
 #include "ruby/util.h"
 #include "ruby/st.h"
-#include "ruby/encoding.h"
-#include "internal.h"
 #include "probes.h"
 #include "id.h"
 
@@ -3526,6 +3524,13 @@ rb_ary_fill(int argc, VALUE *argv, VALUE ary)
  *     c = a + [ "d", "e", "f" ]
  *     c                         #=> [ "a", "b", "c", "d", "e", "f" ]
  *     a                         #=> [ "a", "b", "c" ]
+ *
+ *  Note that
+ *     x += y
+ *  is the same as
+ *     x = x + y
+ *  This means that it produces a new array. As a consequence,
+ *  repeated use of <code>+=</code> on arrays can be quite inefficient.
  *
  *  See also Array#concat.
  */

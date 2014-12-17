@@ -9,19 +9,15 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
-#include "ruby/encoding.h"
+#include "internal.h"
 #include "ruby/debug.h"
 
-#include "internal.h"
 #include "vm_core.h"
 #include "eval_intern.h"
 #include "iseq.h"
 
 static VALUE rb_cBacktrace;
 static VALUE rb_cBacktraceLocation;
-
-extern VALUE ruby_engine_name;
 
 static VALUE
 id2str(ID id)
@@ -110,7 +106,7 @@ location_memsize(const void *ptr)
 static const rb_data_type_t location_data_type = {
     "frame_info",
     {location_mark, RUBY_TYPED_DEFAULT_FREE, location_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static inline rb_backtrace_location_t *
@@ -408,7 +404,7 @@ backtrace_memsize(const void *ptr)
 static const rb_data_type_t backtrace_data_type = {
     "backtrace",
     {backtrace_mark, backtrace_free, backtrace_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 int

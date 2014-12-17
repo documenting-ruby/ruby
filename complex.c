@@ -5,7 +5,6 @@
   which is written in ruby.
 */
 
-#include "ruby.h"
 #include "internal.h"
 #include <math.h>
 
@@ -1633,8 +1632,6 @@ isimagunit(int c)
     return (c == 'i' || c == 'I' ||
 	    c == 'j' || c == 'J');
 }
-
-VALUE rb_cstr_to_rat(const char *, int);
 
 static VALUE
 str2num(char *s)

@@ -1,3 +1,4 @@
+# -*- coding: us-ascii -*-
 begin
   require 'openssl'
 rescue LoadError
@@ -39,6 +40,57 @@ end
 #   p SecureRandom.random_bytes(10) #=> "\016\t{\370g\310pbr\301"
 #   p SecureRandom.random_bytes(10) #=> "\323U\030TO\234\357\020\a\337"
 module SecureRandom
+  if /mswin|mingw/ =~ RUBY_PLATFORM
+    require "fiddle/import"
+
+    module AdvApi32 # :nodoc:
+      extend Fiddle::Importer
+      dlload "advapi32"
+      extern "int CryptAcquireContext(void*, void*, void*, unsigned long, unsigned long)"
+      extern "int CryptGenRandom(void*, unsigned long, void*)"
+
+      def self.get_provider
+        hProvStr = " " * Fiddle::SIZEOF_VOIDP
+        prov_rsa_full = 1
+        crypt_verifycontext = 0xF0000000
+
+        if CryptAcquireContext(hProvStr, nil, nil, prov_rsa_full, crypt_verifycontext) == 0
+          raise SystemCallError, "CryptAcquireContext failed: #{lastWin32ErrorMessage}"
+        end
+        type = Fiddle::SIZEOF_VOIDP == Fiddle::SIZEOF_LONG_LONG ? 'q' : 'l'
+        hProv, = hProvStr.unpack(type)
+        hProv
+      end
+
+      def self.gen_random(n)
+        @hProv ||= get_provider
+        bytes = " ".force_encoding("ASCII-8BIT") * n
+        if CryptGenRandom(@hProv, bytes.size, bytes) == 0
+          raise SystemCallError, "CryptGenRandom failed: #{Kernel32.last_error_message}"
+        end
+        bytes
+      end
+    end
+
+    module Kernel32 # :nodoc:
+      extend Fiddle::Importer
+      dlload "kernel32"
+      extern "unsigned long GetLastError()"
+      extern "unsigned long FormatMessageA(unsigned long, void*, unsigned long, unsigned long, void*, unsigned long, void*)"
+
+      # Following code is based on David Garamond's GUID library for Ruby.
+      def self.last_error_message
+        format_message_ignore_inserts = 0x00000200
+        format_message_from_system    = 0x00001000
+
+        code = GetLastError()
+        msg = "\0" * 1024
+        len = FormatMessageA(format_message_ignore_inserts + format_message_from_system, 0, code, 0, msg, 1024, nil)
+        msg[0, len].force_encoding("filesystem").tr("\r", '').chomp
+      end
+    end
+  end
+
   # SecureRandom.random_bytes generates a random binary string.
   #
   # The argument _n_ specifies the length of the result string.
@@ -55,8 +107,11 @@ module SecureRandom
   # NotImplementedError is raised.
   def self.random_bytes(n=nil)
     n = n ? n.to_int : 16
+    gen_random(n)
+  end
 
-    if defined? OpenSSL::Random
+  if defined? OpenSSL::Random
+    def self.gen_random(n)
       @pid = 0 unless defined?(@pid)
       pid = $$
       unless @pid == pid
@@ -67,17 +122,25 @@ module SecureRandom
       end
       return OpenSSL::Random.random_bytes(n)
     end
+  elsif defined?(AdvApi32)
+    def self.gen_random(n)
+      return AdvApi32.gen_random(n)
+    end
 
-    if !defined?(@has_urandom) || @has_urandom
+    def self.lastWin32ErrorMessage # :nodoc:
+      # for compatibility
+      return Kernel32.last_error_message
+    end
+  else
+    def self.gen_random(n)
       flags = File::RDONLY
       flags |= File::NONBLOCK if defined? File::NONBLOCK
       flags |= File::NOCTTY if defined? File::NOCTTY
       begin
         File.open("/dev/urandom", flags) {|f|
           unless f.stat.chardev?
-            raise Errno::ENOENT
+            break
           end
-          @has_urandom = true
           ret = f.read(n)
           unless ret.length == n
             raise NotImplementedError, "Unexpected partial read from random device: only #{ret.length} for #{n} bytes"
@@ -85,41 +148,10 @@ module SecureRandom
           return ret
         }
       rescue Errno::ENOENT
-        @has_urandom = false
       end
+
+      raise NotImplementedError, "No random device"
     end
-
-    unless defined?(@has_win32)
-      begin
-        require 'Win32API'
-
-        crypt_acquire_context = Win32API.new("advapi32", "CryptAcquireContext", 'PPPII', 'L')
-        @crypt_gen_random = Win32API.new("advapi32", "CryptGenRandom", 'VIP', 'L')
-
-        hProvStr = " " * DL::SIZEOF_VOIDP
-        prov_rsa_full = 1
-        crypt_verifycontext = 0xF0000000
-
-        if crypt_acquire_context.call(hProvStr, nil, nil, prov_rsa_full, crypt_verifycontext) == 0
-          raise SystemCallError, "CryptAcquireContext failed: #{lastWin32ErrorMessage}"
-        end
-        type = DL::SIZEOF_VOIDP == DL::SIZEOF_LONG_LONG ? 'q' : 'l'
-        @hProv, = hProvStr.unpack(type)
-
-        @has_win32 = true
-      rescue LoadError
-        @has_win32 = false
-      end
-    end
-    if @has_win32
-      bytes = " ".force_encoding("ASCII-8BIT") * n
-      if @crypt_gen_random.call(@hProv, bytes.size, bytes) == 0
-        raise SystemCallError, "CryptGenRandom failed: #{lastWin32ErrorMessage}"
-      end
-      return bytes
-    end
-
-    raise NotImplementedError, "No random device"
   end
 
   # SecureRandom.hex generates a random hexadecimal string.
@@ -257,18 +289,5 @@ module SecureRandom
     ary[2] = (ary[2] & 0x0fff) | 0x4000
     ary[3] = (ary[3] & 0x3fff) | 0x8000
     "%08x-%04x-%04x-%04x-%04x%08x" % ary
-  end
-
-  # Following code is based on David Garamond's GUID library for Ruby.
-  def self.lastWin32ErrorMessage # :nodoc:
-    get_last_error = Win32API.new("kernel32", "GetLastError", '', 'L')
-    format_message = Win32API.new("kernel32", "FormatMessageA", 'LPLLPLPPPPPPPP', 'L')
-    format_message_ignore_inserts = 0x00000200
-    format_message_from_system    = 0x00001000
-
-    code = get_last_error.call
-    msg = "\0" * 1024
-    len = format_message.call(format_message_ignore_inserts + format_message_from_system, 0, code, 0, msg, 1024, nil, nil, nil, nil, nil, nil, nil, nil)
-    msg[0, len].force_encoding("filesystem").tr("\r", '').chomp
   end
 end

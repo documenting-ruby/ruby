@@ -1,6 +1,5 @@
 begin
   require_relative 'dummyparser'
-  require_relative '../ruby/envutil'
   require 'test/unit'
   ripper_test = true
   module TestRipper; end
@@ -9,13 +8,10 @@ end
 
 class TestRipper::ParserEvents < Test::Unit::TestCase
 
-  # should be enabled
   def test_event_coverage
-    dispatched = Ripper::PARSER_EVENTS.map {|event,*| event }
-    dispatched.each do |e|
-      assert_equal true, respond_to?("test_#{e}", true),
-                   "event not tested: #{e.inspect}"
-    end
+    dispatched = Ripper::PARSER_EVENTS
+    tested = self.class.instance_methods(false).grep(/\Atest_(\w+)/) {$1.intern}
+    assert_empty dispatched-tested
   end
 
   def parse(str, nm = nil, &bl)
@@ -249,9 +245,8 @@ class TestRipper::ParserEvents < Test::Unit::TestCase
     assert_equal true, thru_begin
   end
 
-  def test_binary
-    thru_binary = nil
-    %w"and or + - * / % ** | ^ & <=> > >= < <= == === != =~ !~ << >> && ||".each do |op|
+  %w"and or + - * / % ** | ^ & <=> > >= < <= == === != =~ !~ << >> && ||".each do |op|
+    define_method("test_binary(#{op})") do
       thru_binary = false
       parse("a #{op} b", :on_binary) {thru_binary = true}
       assert_equal true, thru_binary
@@ -845,6 +840,14 @@ class TestRipper::ParserEvents < Test::Unit::TestCase
     assert_equal true, thru_rescue
     assert_match(/1.*rescue/, parsed)
     assert_match(/rescue\(,var_field\(e\),\[2\]\)/, parsed)
+  end
+
+  def test_rescue_class
+    thru_rescue = false
+    parsed = parse('begin; 1; rescue RuntimeError => e; 2; end', :on_rescue) {thru_rescue = true}
+    assert_equal true, thru_rescue
+    assert_match(/1.*rescue/, parsed)
+    assert_match(/rescue\(\[ref\(RuntimeError\)\],var_field\(e\),\[2\]\)/, parsed)
   end
 
   def test_rescue_mod

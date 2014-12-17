@@ -20,11 +20,11 @@ opt = OptionParser.new do |o|
   o.order!(ARGV)
 end
 template = ARGV.shift or abort opt.to_s
-erb = ERB.new(File.read(template), nil, '%')
+erb = ERB.new(File.read(template), nil, '%-')
 erb.filename = template
 result = source ? erb.src : erb.result
 if output
-  if ifchange and (vpath.open(output) {|f| f.read} rescue nil) == result
+  if ifchange and (vpath.open(output, "rb") {|f| f.read} rescue nil) == result
     puts "#{output} unchanged"
   else
     open(output, "wb") {|f| f.print result}

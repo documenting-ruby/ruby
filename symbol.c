@@ -9,10 +9,8 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
-#include "ruby/st.h"
-#include "ruby/encoding.h"
 #include "internal.h"
+#include "ruby/st.h"
 #include "node.h"
 #include "symbol.h"
 #include "gc.h"
@@ -24,9 +22,7 @@
 
 #define SYMBOL_PINNED_P(sym) (RSYMBOL(sym)->id&~ID_SCOPE_MASK)
 
-#define DYNAMIC_ID_P(id) (!(id&ID_STATIC_SYM)&&id>tLAST_OP_ID)
 #define STATIC_SYM2ID(sym) RSHIFT((unsigned long)(sym), RUBY_SPECIAL_SHIFT)
-#define STATIC_ID2SYM(id)  (((VALUE)(id)<<RUBY_SPECIAL_SHIFT)|SYMBOL_FLAG)
 
 static ID register_static_symid(ID, const char *, long, rb_encoding *);
 static ID register_static_symid_str(ID, VALUE);
@@ -52,6 +48,9 @@ static ID register_static_symid_str(ID, VALUE);
 #define tASET   RUBY_TOKEN(ASET)
 #define tLSHFT  RUBY_TOKEN(LSHFT)
 #define tRSHFT  RUBY_TOKEN(RSHFT)
+#define tCOLON2 RUBY_TOKEN(COLON2)
+#define tANDOP  RUBY_TOKEN(ANDOP)
+#define tOROP   RUBY_TOKEN(OROP)
 
 static const struct {
     unsigned short token;
@@ -74,6 +73,9 @@ static const struct {
     {tASET,	"[]="},
     {tLSHFT,	"<<"},
     {tRSHFT,	">>"},
+    {tCOLON2,   "::"},
+    {tANDOP,    "&&"},
+    {tOROP,     "||"},
 };
 
 #define op_tbl_count numberof(op_tbl)
@@ -748,6 +750,7 @@ rb_sym2id(VALUE sym)
     return id;
 }
 
+#undef rb_id2sym
 VALUE
 rb_id2sym(ID x)
 {
@@ -884,6 +887,48 @@ int
 rb_is_junk_id(ID id)
 {
     return is_junk_id(id);
+}
+
+int
+rb_is_const_sym(VALUE sym)
+{
+    return is_const_sym(sym);
+}
+
+int
+rb_is_class_sym(VALUE sym)
+{
+    return is_class_sym(sym);
+}
+
+int
+rb_is_global_sym(VALUE sym)
+{
+    return is_global_sym(sym);
+}
+
+int
+rb_is_instance_sym(VALUE sym)
+{
+    return is_instance_sym(sym);
+}
+
+int
+rb_is_attrset_sym(VALUE sym)
+{
+    return is_attrset_sym(sym);
+}
+
+int
+rb_is_local_sym(VALUE sym)
+{
+    return is_local_sym(sym);
+}
+
+int
+rb_is_junk_sym(VALUE sym)
+{
+    return is_junk_sym(sym);
 }
 
 /**

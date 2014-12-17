@@ -11,10 +11,8 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
-#include "ruby/re.h"
-#include "ruby/encoding.h"
 #include "internal.h"
+#include "ruby/re.h"
 #include "id.h"
 #include <math.h>
 #include <stdarg.h>
@@ -24,8 +22,6 @@
 #endif
 
 #define BIT_DIGITS(N)   (((N)*146)/485 + 1)  /* log2(10) =~ 146/485 */
-
-extern const char ruby_digitmap[];
 
 static void fmt_setup(char*,size_t,int,int,int,int);
 
@@ -1253,6 +1249,9 @@ fmt_setup(char *buf, size_t size, int c, int flags, int width, int prec)
 #define FLOATING_POINT 1
 #define BSD__dtoa ruby_dtoa
 #define BSD__hdtoa ruby_hdtoa
+#ifdef RUBY_PRI_VALUE_MARK
+# define PRI_EXTRA_MARK RUBY_PRI_VALUE_MARK
+#endif
 #include "vsnprintf.c"
 
 typedef struct {

@@ -12,6 +12,10 @@
 #ifndef RUBY_INTERNAL_H
 #define RUBY_INTERNAL_H 1
 
+#include "ruby.h"
+#include "ruby/encoding.h"
+#include "ruby/io.h"
+
 #if defined(__cplusplus)
 extern "C" {
 #if 0
@@ -63,14 +67,17 @@ extern "C" {
 
 #define numberof(array) ((int)(sizeof(array) / sizeof((array)[0])))
 
-#define STATIC_ASSERT_TYPE(name) static_assert_##name##_check
-#define STATIC_ASSERT(name, expr) typedef int STATIC_ASSERT_TYPE(name)[1 - 2*!(expr)]
-
 #define GCC_VERSION_SINCE(major, minor, patchlevel) \
   (defined(__GNUC__) && !defined(__INTEL_COMPILER) && \
    ((__GNUC__ > (major)) ||  \
     (__GNUC__ == (major) && __GNUC_MINOR__ > (minor)) || \
     (__GNUC__ == (major) && __GNUC_MINOR__ == (minor) && __GNUC_PATCHLEVEL__ >= (patchlevel))))
+
+#if GCC_VERSION_SINCE(4, 6, 0)
+# define STATIC_ASSERT(name, expr) _Static_assert(expr, #name ": " #expr)
+#else
+# define STATIC_ASSERT(name, expr) typedef int static_assert_##name##_check[1 - 2*!(expr)]
+#endif
 
 #define SIGNED_INTEGER_TYPE_P(int_type) (0 > ((int_type)0)-1)
 #define SIGNED_INTEGER_MAX(sint_type) \
@@ -461,6 +468,11 @@ struct RHash {
 #define RHASH_SIZE(h) (RHASH(h)->ntbl ? (st_index_t)RHASH(h)->ntbl->num_entries : 0)
 #endif
 
+/* missing/setproctitle.c */
+#ifndef HAVE_SETPROCTITLE
+extern void ruby_init_setproctitle(int argc, char *argv[]);
+#endif
+
 /* class.c */
 void rb_class_subclass_add(VALUE super, VALUE klass);
 void rb_class_remove_from_super_subclasses(VALUE);
@@ -510,19 +522,20 @@ VALUE rb_ary_last(int, const VALUE *, VALUE);
 void rb_ary_set_len(VALUE, long);
 void rb_ary_delete_same(VALUE, VALUE);
 VALUE rb_ary_tmp_new_fill(long capa);
+size_t rb_ary_memsize(VALUE);
 #ifdef __GNUC__
 #define rb_ary_new_from_args(n, ...) \
     __extension__ ({ \
 	const VALUE args_to_new_ary[] = {__VA_ARGS__}; \
 	if (__builtin_constant_p(n)) { \
 	    STATIC_ASSERT(rb_ary_new_from_args, numberof(args_to_new_ary) == (n)); \
-	    (void)sizeof(STATIC_ASSERT_TYPE(rb_ary_new_from_args)); /* suppress warnings by gcc 4.8 or later */ \
 	} \
 	rb_ary_new_from_values(numberof(args_to_new_ary), args_to_new_ary); \
     })
 #endif
 
 /* bignum.c */
+extern const char ruby_digitmap[];
 VALUE rb_big_fdiv(VALUE x, VALUE y);
 VALUE rb_big_uminus(VALUE x);
 VALUE rb_integer_float_cmp(VALUE x, VALUE y);
@@ -563,10 +576,10 @@ void ruby_register_rollback_func_for_ensure(VALUE (*ensure_func)(ANYARGS), VALUE
 PRINTF_ARGS(void ruby_debug_printf(const char*, ...), 1, 2);
 
 /* dmyext.c */
+void Init_enc(void);
 void Init_ext(void);
 
 /* encoding.c */
-#ifdef RUBY_ENCODING_H
 enum ruby_preserved_encindex {
     ENCINDEX_ASCII,
     ENCINDEX_UTF_8,
@@ -587,14 +600,28 @@ enum ruby_preserved_encindex {
 
     ENCINDEX_BUILTIN_MAX
 };
-#endif
+
 #define rb_ascii8bit_encindex() ENCINDEX_ASCII
 #define rb_utf8_encindex()      ENCINDEX_UTF_8
 #define rb_usascii_encindex()   ENCINDEX_US_ASCII
 ID rb_id_encoding(void);
 void rb_gc_mark_encodings(void);
+rb_encoding *rb_enc_get_from_index(int index);
+int rb_encdb_replicate(const char *alias, const char *orig);
+int rb_encdb_alias(const char *alias, const char *orig);
+int rb_encdb_dummy(const char *name);
+void rb_encdb_declare(const char *name);
+void rb_enc_set_base(const char *name, const char *orig);
+int rb_enc_set_dummy(int index);
+void rb_encdb_set_unicode(int index);
+
+/* enum.c */
+VALUE rb_f_send(int argc, VALUE *argv, VALUE recv);
 
 /* error.c */
+extern VALUE rb_eEAGAIN;
+extern VALUE rb_eEWOULDBLOCK;
+extern VALUE rb_eEINPROGRESS;
 NORETURN(PRINTF_ARGS(void rb_compile_bug(const char*, int, const char*, ...), 3, 4));
 VALUE rb_check_backtrace(VALUE);
 NORETURN(void rb_async_bug_errno(const char *,int));
@@ -641,6 +668,8 @@ NORETURN(void rb_syserr_fail_path_in(const char *func_name, int err, VALUE path)
 #endif
 
 /* gc.c */
+extern VALUE *ruby_initial_gc_stress_ptr;
+extern int ruby_disable_gc;
 void Init_heap(void);
 void *ruby_mimmalloc(size_t size);
 void ruby_mimfree(void *ptr);
@@ -651,6 +680,7 @@ void rb_gc_writebarrier_remember(VALUE obj);
 #define rb_gc_writebarrier_remember(obj) 0
 #endif
 void ruby_gc_set_params(int safe_level);
+void rb_copy_wb_protected_attribute(VALUE dest, VALUE obj);
 
 #if defined(HAVE_MALLOC_USABLE_SIZE) || defined(HAVE_MALLOC_SIZE) || defined(_WIN32)
 #define ruby_sized_xrealloc(ptr, new_size, old_size) ruby_xrealloc(ptr, new_size)
@@ -668,6 +698,10 @@ void rb_gc_resurrect(VALUE ptr);
 
 /* hash.c */
 struct st_table *rb_hash_tbl_raw(VALUE hash);
+VALUE rb_hash_has_key(VALUE hash, VALUE key);
+VALUE rb_hash_set_default_proc(VALUE hash, VALUE proc);
+long rb_objid_hash(st_index_t index);
+
 #define RHASH_TBL_RAW(h) rb_hash_tbl_raw(h)
 VALUE rb_hash_keys(VALUE hash);
 VALUE rb_hash_values(VALUE hash);
@@ -684,6 +718,7 @@ ssize_t rb_io_bufread(VALUE io, void *buf, size_t size);
 void rb_stdio_set_default_encoding(void);
 void rb_write_error_str(VALUE mesg);
 VALUE rb_io_flush_raw(VALUE, int);
+size_t rb_io_memsize(const rb_io_t *);
 
 /* iseq.c */
 VALUE rb_iseq_clone(VALUE iseqval, VALUE newcbase);
@@ -698,7 +733,15 @@ VALUE rb_iseq_method_name(VALUE self);
 /* load.c */
 VALUE rb_get_load_path(void);
 VALUE rb_get_expanded_load_path(void);
+int rb_require_internal(VALUE fname, int safe);
 NORETURN(void rb_load_fail(VALUE, const char*));
+
+/* loadpath.c */
+extern const char ruby_exec_prefix[];
+extern const char ruby_initial_load_paths[];
+
+/* localeinit.c */
+int Init_enc_set_filesystem_encoding(void);
 
 /* math.c */
 VALUE rb_math_atan2(VALUE, VALUE);
@@ -820,6 +863,14 @@ int rb_is_attrset_name(VALUE name);
 int rb_is_local_name(VALUE name);
 int rb_is_method_name(VALUE name);
 int rb_is_junk_name(VALUE name);
+int rb_is_const_sym(VALUE sym);
+int rb_is_class_sym(VALUE sym);
+int rb_is_global_sym(VALUE sym);
+int rb_is_instance_sym(VALUE sym);
+int rb_is_attrset_sym(VALUE sym);
+int rb_is_local_sym(VALUE sym);
+int rb_is_method_sym(VALUE sym);
+int rb_is_junk_sym(VALUE sym);
 ID rb_make_internal_id(void);
 void rb_gc_free_dsymbol(VALUE);
 ID rb_id_attrget(ID id);
@@ -834,7 +885,6 @@ VALUE rb_block_clear_env_self(VALUE proc);
 #define RB_MAX_GROUPS (65536)
 
 struct rb_execarg {
-    int use_shell;
     union {
         struct {
             VALUE shell_script;
@@ -850,6 +900,7 @@ struct rb_execarg {
     VALUE envp_str;
     VALUE envp_buf;
     VALUE dup2_tmpbuf;
+    unsigned use_shell : 1;
     unsigned pgroup_given : 1;
     unsigned umask_given : 1;
     unsigned unsetenv_others_given : 1;
@@ -866,11 +917,11 @@ struct rb_execarg {
     mode_t umask_mask;
     rb_uid_t uid;
     rb_gid_t gid;
+    int close_others_maxhint;
     VALUE fd_dup2;
     VALUE fd_close;
     VALUE fd_open;
     VALUE fd_dup2_child;
-    int close_others_maxhint;
     VALUE env_modification; /* Qfalse or [[k1,v1], ...] */
     VALUE chdir_dir;
 };
@@ -888,6 +939,7 @@ void rb_last_status_clear(void);
 /* rational.c */
 VALUE rb_lcm(VALUE x, VALUE y);
 VALUE rb_rational_reciprocal(VALUE x);
+VALUE rb_cstr_to_rat(const char *, int);
 
 /* re.c */
 VALUE rb_reg_compile(VALUE str, int options, const char *sourcefile, int sourceline);
@@ -896,8 +948,12 @@ long rb_reg_search0(VALUE, VALUE, long, int, int);
 void rb_backref_set_string(VALUE string, long pos, long len);
 
 /* signal.c */
+extern int ruby_enable_coredump;
 int rb_get_next_signal(void);
 int rb_sigaltstack_size(void);
+
+/* st.c */
+extern const struct st_hash_type st_hashtype_num;
 
 /* strftime.c */
 #ifdef RUBY_ENCODING_H
@@ -928,6 +984,7 @@ VALUE rb_external_str_with_enc(VALUE str, rb_encoding *eenc);
 #define STR_SHARED_P(s)  FL_ALL((s), STR_NOEMBED|ELTS_SHARED)
 #define is_ascii_string(str) (rb_enc_str_coderange(str) == ENC_CODERANGE_7BIT)
 #define is_broken_string(str) (rb_enc_str_coderange(str) == ENC_CODERANGE_BROKEN)
+size_t rb_str_memsize(VALUE);
 
 /* struct.c */
 VALUE rb_struct_init_copy(VALUE copy, VALUE s);
@@ -953,6 +1010,26 @@ void ruby_kill(rb_pid_t pid, int sig);
 /* thread_pthread.c, thread_win32.c */
 void Init_native_thread(void);
 
+/* transcode.c */
+extern VALUE rb_cEncodingConverter;
+size_t rb_econv_memsize(rb_econv_t *);
+
+/* us_ascii.c */
+extern rb_encoding OnigEncodingUS_ASCII;
+
+/* util.c */
+char *ruby_dtoa(double d_, int mode, int ndigits, int *decpt, int *sign, char **rve);
+char *ruby_hdtoa(double d, const char *xdigs, int ndigits, int *decpt, int *sign, char **rve);
+
+/* utf_8.c */
+extern rb_encoding OnigEncodingUTF_8;
+
+/* variable.c */
+size_t rb_generic_ivar_memsize(VALUE);
+
+/* version.c */
+extern VALUE ruby_engine_name;
+
 /* vm_insnhelper.h */
 rb_serial_t rb_next_class_serial(void);
 
@@ -969,6 +1046,10 @@ void rb_thread_mark(void *th);
 const void **rb_vm_get_insns_address_table(void);
 VALUE rb_sourcefilename(void);
 void rb_vm_pop_cfunc_frame(void);
+int rb_vm_add_root_module(ID id, VALUE module);
+void rb_vm_check_redefinition_by_prepend(VALUE klass);
+VALUE rb_yield_refine_block(VALUE refinement, VALUE refinements);
+VALUE ruby_vm_sysstack_error_copy(void);
 
 /* vm_dump.c */
 void rb_print_backtrace(void);
@@ -984,8 +1065,6 @@ VALUE rb_catch_protect(VALUE t, rb_block_call_func *func, VALUE data, int *state
 
 /* vm_insnhelper.c */
 VALUE rb_equal_opt(VALUE obj1, VALUE obj2);
-int rb_get_kwargs(VALUE keyword_hash, const ID *table, int required, int optional, VALUE *);
-VALUE rb_extract_keywords(VALUE *orighash);
 
 /* vm_method.c */
 void Init_eval_method(void);
@@ -1013,7 +1092,7 @@ const char *rb_objspace_data_type_name(VALUE obj);
 /* Temporary.  This API will be removed (renamed). */
 VALUE rb_thread_io_blocking_region(rb_blocking_function_t *func, void *data1, int fd);
 
-/* bignum.c */
+/* bignum.c (export) */
 VALUE rb_big_mul_normal(VALUE x, VALUE y);
 VALUE rb_big_mul_balance(VALUE x, VALUE y);
 VALUE rb_big_mul_karatsuba(VALUE x, VALUE y);
@@ -1032,21 +1111,21 @@ VALUE rb_big2str_gmp(VALUE x, int base);
 VALUE rb_str2big_gmp(VALUE arg, int base, int badcheck);
 #endif
 
-/* error.c */
+/* error.c (export) */
 int rb_bug_reporter_add(void (*func)(FILE *, void *), void *data);
 
-/* file.c */
+/* file.c (export) */
 #ifdef __APPLE__
 VALUE rb_str_normalize_ospath(const char *ptr, long len);
 #endif
 
-/* io.c */
+/* io.c (export) */
 void rb_maygvl_fd_fix_cloexec(int fd);
 
-/* numeric.c */
+/* numeric.c (export) */
 VALUE rb_int_positive_pow(long x, unsigned long y);
 
-/* process.c */
+/* process.c (export) */
 int rb_exec_async_signal_safe(const struct rb_execarg *e, char *errmsg, size_t errmsg_buflen);
 rb_pid_t rb_fork_async_signal_safe(int *status, int (*chfunc)(void*, char *, size_t), void *charg, VALUE fds, char *errmsg, size_t errmsg_buflen);
 VALUE rb_execarg_new(int argc, const VALUE *argv, int accept_shell);
@@ -1058,30 +1137,31 @@ int rb_execarg_run_options(const struct rb_execarg *e, struct rb_execarg *s, cha
 VALUE rb_execarg_extract_options(VALUE execarg_obj, VALUE opthash);
 void rb_execarg_setenv(VALUE execarg_obj, VALUE env);
 
-/* rational.c */
+/* rational.c (export) */
 VALUE rb_gcd_normal(VALUE self, VALUE other);
 #if defined(HAVE_LIBGMP) && defined(HAVE_GMP_H)
 VALUE rb_gcd_gmp(VALUE x, VALUE y);
 #endif
 
-/* string.c */
+/* string.c (export) */
 #ifdef RUBY_ENCODING_H
 /* internal use */
 VALUE rb_setup_fake_str(struct RString *fake_str, const char *name, long len, rb_encoding *enc);
 #endif
 
-/* util.c */
+/* util.c (export) */
 extern const signed char ruby_digit36_to_number_table[];
 
-/* variable.c */
+/* variable.c (export) */
 void rb_gc_mark_global_tbl(void);
 void rb_mark_generic_ivar(VALUE);
 void rb_mark_generic_ivar_tbl(void);
+VALUE rb_const_missing(VALUE klass, VALUE name);
 
 int rb_st_insert_id_and_value(VALUE obj, st_table *tbl, ID key, VALUE value);
 st_table *rb_st_copy(VALUE obj, struct st_table *orig_tbl);
 
-/* gc.c */
+/* gc.c (export) */
 size_t rb_obj_memsize_of(VALUE);
 #define RB_OBJ_GC_FLAGS_MAX 5
 size_t rb_obj_gc_flags(VALUE, ID[], size_t);

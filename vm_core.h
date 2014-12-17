@@ -135,13 +135,20 @@ union iseq_inline_storage_entry {
 struct rb_thread_struct;
 struct rb_control_frame_struct;
 
+typedef struct rb_call_info_kw_arg_struct {
+    int keyword_len;
+    ID keywords[1];
+} rb_call_info_kw_arg_t;
+
 /* rb_call_info_t contains calling information including inline cache */
 typedef struct rb_call_info_struct {
     /* fixed at compile time */
     ID mid;
+
     unsigned int flag;
     int orig_argc;
     rb_iseq_t *blockiseq;
+    rb_call_info_kw_arg_t *kw_arg;
 
     /* inline cache: keys */
     rb_serial_t method_state;
@@ -233,46 +240,74 @@ struct rb_iseq_struct {
     rb_call_info_t *callinfo_entries;
 
     /**
-     * argument information
+     * parameter information
      *
      *  def m(a1, a2, ..., aM,                    # mandatory
      *        b1=(...), b2=(...), ..., bN=(...),  # optional
      *        *c,                                 # rest
      *        d1, d2, ..., dO,                    # post
      *        e1:(...), e2:(...), ..., eK:(...),  # keyword
-     *        **f,                                # keyword rest
+     *        **f,                                # keyword_rest
      *        &g)                                 # block
      * =>
      *
-     *  argc           = M                 // or  0 if no mandatory arg
-     *  arg_opts       = N+1               // or  0 if no optional arg
-     *  arg_rest       = M+N               // or -1 if no rest arg
-     *  arg_opt_table  = [ (arg_opts entries) ]
-     *  arg_post_start = M+N+(*1)          // or 0 if no post arguments
-     *  arg_post_len   = O                 // or 0 if no post arguments
-     *  arg_keywords   = K                 // or 0 if no keyword arg
-     *  arg_block      = M+N+(*1)+O+K      // or -1 if no block arg
-     *  arg_keyword    = M+N+(*1)+O+K+(&1) // or -1 if no keyword arg/rest
-     *  arg_simple     = 0 if not simple arguments.
-     *                 = 1 if no opt, rest, post, block.
-     *                 = 2 if ambiguous block parameter ({|a|}).
-     *  arg_size       = M+N+O+(*1)+K+(&1)+(**1) argument size.
+     *  lead_num     = M
+     *  opt_num      = N
+     *  rest_start   = M+N
+     *  post_start   = M+N+(*1)
+     *  post_num     = O
+     *  keyword_num  = K
+     *  block_start  = M+N+(*1)+O+K
+     *  keyword_bits = M+N+(*1)+O+K+(&1)
+     *  size         = M+N+O+(*1)+K+(&1)+(**1) // parameter size.
      */
 
-    int argc;
-    int arg_simple;
-    int arg_rest;
-    int arg_block;
-    int arg_opts;
-    int arg_post_len;
-    int arg_post_start;
-    int arg_size;
-    VALUE *arg_opt_table;
-    int arg_keyword;
-    int arg_keyword_check; /* if this is true, raise an ArgumentError when unknown keyword argument is passed */
-    int arg_keywords;
-    int arg_keyword_required;
-    ID *arg_keyword_table;
+    struct {
+	struct {
+	    unsigned int has_lead   : 1;
+	    unsigned int has_opt    : 1;
+	    unsigned int has_rest   : 1;
+	    unsigned int has_post   : 1;
+	    unsigned int has_kw     : 1;
+	    unsigned int has_kwrest : 1;
+	    unsigned int has_block  : 1;
+
+	    unsigned int ambiguous_param0 : 1; /* {|a|} */
+	} flags;
+
+	int size;
+
+	int lead_num;
+	int opt_num;
+	int rest_start;
+	int post_start;
+	int post_num;
+	int block_start;
+
+	VALUE *opt_table; /* (opt_num + 1) entries. */
+	/* opt_num and opt_table:
+	 *
+	 * def foo o1=e1, o2=e2, ..., oN=eN
+	 * #=>
+	 *   # prologue code
+	 *   A1: e1
+	 *   A2: e2
+	 *   ...
+	 *   AN: eN
+	 *   AL: body
+	 * opt_num = N
+	 * opt_table = [A1, A2, ..., AN, AL]
+	 */
+
+	struct rb_iseq_param_keyword {
+	    int num;
+	    int required_num;
+	    int bits_start;
+	    int rest_start;
+	    ID *table;
+	    VALUE *default_values;
+	} *keyword;
+    } param;
 
     /* catch table */
     struct iseq_catch_table *catch_table;
@@ -655,6 +690,8 @@ typedef struct rb_thread_struct {
 
     /* storage */
     st_table *local_storage;
+    VALUE local_storage_recursive_hash;
+    VALUE local_storage_recursive_hash_for_trace;
 
     rb_thread_list_t *join_list;
 
@@ -793,7 +830,7 @@ enum vm_check_match_type {
 #define VM_CALL_TAILCALL        (0x01 << 5) /* located at tail position */
 #define VM_CALL_SUPER           (0x01 << 6) /* super */
 #define VM_CALL_OPT_SEND        (0x01 << 7) /* internal flag */
-#define VM_CALL_ARGS_SKIP_SETUP (0x01 << 8) /* (flag & (SPLAT|BLOCKARG)) && blockiseq == 0 */
+#define VM_CALL_ARGS_SIMPLE     (0x01 << 8) /* (ci->flag & (SPLAT|BLOCKARG)) && ci->blockiseq == NULL && ci->kw_arg == NULL */
 
 enum vm_special_object_type {
     VM_SPECIAL_OBJECT_VMCORE = 1,
@@ -909,6 +946,7 @@ int rb_thread_method_id_and_class(rb_thread_t *th, ID *idp, VALUE *klassp);
 
 VALUE rb_vm_invoke_proc(rb_thread_t *th, rb_proc_t *proc,
 			int argc, const VALUE *argv, const rb_block_t *blockptr);
+VALUE rb_vm_make_proc_lambda(rb_thread_t *th, const rb_block_t *block, VALUE klass, int8_t is_lambda);
 VALUE rb_vm_make_proc(rb_thread_t *th, const rb_block_t *block, VALUE klass);
 VALUE rb_vm_make_binding(rb_thread_t *th, const rb_control_frame_t *src_cfp);
 VALUE rb_vm_make_env_object(rb_thread_t *th, rb_control_frame_t *cfp);
@@ -950,8 +988,8 @@ rb_vm_living_threads_remove(rb_vm_t *vm, rb_thread_t *th)
 
 int ruby_thread_has_gvl_p(void);
 typedef int rb_backtrace_iter_func(void *, VALUE, int, VALUE);
-rb_control_frame_t *rb_vm_get_ruby_level_next_cfp(rb_thread_t *th, const rb_control_frame_t *cfp);
-rb_control_frame_t *rb_vm_get_binding_creatable_next_cfp(rb_thread_t *th, const rb_control_frame_t *cfp);
+rb_control_frame_t *rb_vm_get_ruby_level_next_cfp(const rb_thread_t *th, const rb_control_frame_t *cfp);
+rb_control_frame_t *rb_vm_get_binding_creatable_next_cfp(const rb_thread_t *th, const rb_control_frame_t *cfp);
 int rb_vm_get_sourceline(const rb_control_frame_t *);
 VALUE rb_name_err_mesg_new(VALUE obj, VALUE mesg, VALUE recv, VALUE method);
 void rb_vm_stack_to_heap(rb_thread_t *th);
@@ -1105,9 +1143,6 @@ void rb_threadptr_exec_event_hooks_and_pop_frame(struct rb_trace_arg_struct *tra
 
 #define EXEC_EVENT_HOOK_AND_POP_FRAME(th_, flag_, self_, id_, klass_, data_) \
   EXEC_EVENT_HOOK_ORIG(th_, flag_, self_, id_, klass_, data_, 1)
-
-VALUE rb_threadptr_reset_recursive_data(rb_thread_t *th);
-void rb_threadptr_restore_recursive_data(rb_thread_t *th, VALUE old);
 
 RUBY_SYMBOL_EXPORT_BEGIN
 

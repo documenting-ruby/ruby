@@ -23,11 +23,10 @@
 #include <CoreFoundation/CFString.h>
 #endif
 
-#include "ruby/ruby.h"
+#include "internal.h"
 #include "ruby/io.h"
 #include "ruby/util.h"
 #include "dln.h"
-#include "internal.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -368,7 +367,7 @@ stat_memsize(const void *p)
 static const rb_data_type_t stat_data_type = {
     "stat",
     {NULL, RUBY_TYPED_DEFAULT_FREE, stat_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static VALUE
@@ -4552,7 +4551,6 @@ rb_file_flock(VALUE obj, VALUE operation)
     }
     return INT2FIX(0);
 }
-#undef flock
 
 static void
 test_check(int n, int argc, VALUE *argv)

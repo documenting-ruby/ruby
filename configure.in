@@ -46,10 +46,13 @@ if test "`RUBYOPT=- $BASERUBY -e 'p 42' 2>/dev/null`" = 42; then
 	BASERUBY="$BASERUBY --disable=gems"
     fi
     $BASERUBY -C "$srcdir/tool" downloader.rb -e gnu config.guess config.sub
+    HAVE_BASERUBY=yes
 else
     BASERUBY="echo executable host ruby is required.  use --with-baseruby option.; false"
+    HAVE_BASERUBY=no
 fi
 AC_SUBST(BASERUBY)
+AC_SUBST(HAVE_BASERUBY)
 
 AC_DEFUN([RUBY_MINGW32],
 [AS_CASE(["$host_os"],
@@ -101,7 +104,7 @@ AC_DEFUN([RUBY_NACL],
           [i?86], [nacl_cv_cpu_nick=x86
                    nacl_cv_cpu_nick2=x86_32],
           [le32], [nacl_cv_cpu_nick=pnacl
-                   nacl_cv_cpu_nick2=pnacl,
+                   nacl_cv_cpu_nick2=pnacl
                    ac_cv_exeext=.pexe],
           [nacl_cv_cpu_nick=$target_cpu])
   AS_CASE(["$build_os"],
@@ -153,13 +156,19 @@ AC_DEFUN([RUBY_NACL],
   AC_MSG_RESULT(${NACL_SDK_ROOT}/toolchain/${NACL_TOOLCHAIN}/bin)
 
   RUBY_APPEND_OPTIONS(XCFLAGS, '-I$(NACL_SDK_ROOT)/include')
+  if test x"${nacl_cv_cpu_nick}" = xpnacl; then
+    RUBY_APPEND_OPTIONS(XCFLAGS, '-isystem $(NACL_SDK_ROOT)/include/pnacl')
+  elif test x"${nacl_cv_build_variant}" = xnewlib; then
+    RUBY_APPEND_OPTIONS(XCFLAGS, '-isystem $(NACL_SDK_ROOT)/include/newlib')
+  fi
+
   AC_MSG_CHECKING([nacl library path])
   if test -d "${NACL_SDK_ROOT}/lib/${nacl_cv_build_variant}_${nacl_cv_cpu_nick2}/Release"; then
     nacl_cv_libpath="${nacl_cv_build_variant}_${nacl_cv_cpu_nick2}"
   elif test -d "${NACL_SDK_ROOT}/lib/${nacl_cv_cpu_nick2}/Release"; then
     nacl_cv_libpath="${nacl_cv_cpu_nick2}"
   else
-    AC_MSG_ERROR("not found")
+    AC_MSG_ERROR([not found])
   fi
   AC_MSG_RESULT([${nacl_cv_libpath}])
   RUBY_APPEND_OPTIONS(XLDFLAGS, '-L$(NACL_SDK_ROOT)/'"lib/${nacl_cv_libpath}/Release")
@@ -169,6 +178,7 @@ AC_DEFUN([RUBY_NACL],
   AC_SUBST(NACL_SDK_VARIANT, "${nacl_cv_build_variant}")
   AC_SUBST(NACL_LIB_PATH, "${nacl_cv_libpath}")
   AC_CHECK_TOOLS(CC, [clang gcc])
+  AC_CHECK_TOOLS(CXX, [clang++ g++])
 ])])
 
 AC_DEFUN([RUBY_NACL_CHECK_PEPPER_TYPES],
@@ -457,7 +467,7 @@ fi
 RUBY_NACL
 AS_CASE(["$host_os:$build_os"],
 [darwin*:darwin*], [
-    AC_CHECK_TOOLS(CC, [gcc-4.2 clang gcc cc])
+    AC_CHECK_TOOLS(CC, [clang gcc cc])
     # Following Apple deployed clang are broken
     # clang version 1.0 (http://llvm.org/svn/llvm-project/cfe/tags/Apple/clang-23 exported)
     # Apple clang version 2.0 (tags/Apple/clang-137) (based on LLVM 2.9svn)
@@ -487,7 +497,9 @@ if test "$GCC" = yes; then
     linker_flag=-Wl,
     : ${optflags=-O3}
     gcc_major=`echo =__GNUC__ | $CC -E -xc - | sed '/^=/!d;s///'`
+    gcc_minor=`echo =__GNUC_MINOR__ | $CC -E -xc - | sed '/^=/!d;s///'`
     test -n "$gcc_major" || gcc_major=0
+    test -n "$gcc_minor" || gcc_minor=0
     # RUBY_APPEND_OPTIONS(XCFLAGS, ["-include ruby/config.h" "-include ruby/missing.h"])
 else
     linker_flag=
@@ -994,6 +1006,9 @@ AS_CASE(["$target_os"],
 		ac_cv_lib_crypt_crypt=no
 		ac_cv_func_fdatasync=no # Mac OS X wrongly reports it has fdatasync()
 		ac_cv_func_vfork=no
+		if test $gcc_major -lt 4 -o \( $gcc_major -eq 4 -a $gcc_minor -lt 3 \); then
+		    ac_cv_func___builtin_setjmp=no
+		fi
                 AC_CACHE_CHECK(for broken crypt with 8bit chars, rb_cv_broken_crypt,
                     [AC_TRY_RUN([
 #include <stdio.h>
@@ -2697,6 +2712,17 @@ if test x"$enable_pthread" = xyes; then
     fi
 fi
 if test x"$ac_cv_header_ucontext_h" = xyes; then
+    AC_CACHE_CHECK([if mcontext_t is a pointer], [rb_cv_mcontext_t_ptr],
+	[AC_TRY_COMPILE([@%:@include <ucontext.h>
+	mcontext_t test(mcontext_t mc) {return mc+1;}
+	],
+	[test(0);],
+	[rb_cv_mcontext_t_ptr=yes], [rb_cv_mcontext_t_ptr=no])])
+    if test x"$rb_cv_mcontext_t_ptr" = xyes; then
+	AC_DEFINE_UNQUOTED(DEFINE_MCONTEXT_PTR(mc, uc), mcontext_t mc = (uc)->uc_mcontext)
+    else
+	AC_DEFINE_UNQUOTED(DEFINE_MCONTEXT_PTR(mc, uc), mcontext_t *mc = &(uc)->uc_mcontext)
+    fi
     if test x"$rb_with_pthread" = xyes; then
 	AC_CHECK_FUNCS(getcontext setcontext)
     fi
@@ -3225,11 +3251,21 @@ AS_CASE([",$EXTSTATIC,"], [,static,|*,enc,*], [
   EXTOBJS='ext/extinit.$(OBJEXT)'
   AC_DEFINE_UNQUOTED(EXTSTATIC, 1)
   AC_SUBST(ENCSTATIC, static)
+], [
+  ENCOBJS='dmyenc.$(OBJEXT)'
+  EXTOBJS='dmyext.$(OBJEXT)'
 ])
 AC_SUBST(ENCOBJS)
 AC_SUBST(EXTOBJS)
 
-if test -f "$srcdir/ext/Setup.$target_os"; then
+AC_ARG_WITH(setup,
+	    AS_HELP_STRING([--with-setup=SETUP], [use extension libraries setup]),
+	    [setup=$withval])
+if test -n "$setup"; then
+    if ! test -f "ext/$setup" -o -f "$srcdir/ext/$setup"; then
+	AC_MSG_ERROR(Setup file $setup not found under ext or $srcdir/ext)
+    fi
+elif test -f "$srcdir/ext/Setup.$target_os"; then
     setup="Setup.$target_os"
 else
     setup=
@@ -3975,7 +4011,7 @@ if test ${RUBY_LIB_VERSION_STYLE+set}; then
 elif test -z "${ruby_version}"; then
     AC_MSG_ERROR([No ruby version, No place for bundled libraries])
 else
-    RUBY_LIB_VERSION="\"${ruby_version}\""
+    RUBY_LIB_VERSION="${ruby_version}"
 fi
 AC_SUBST(RUBY_LIB_VERSION_STYLE)
 AC_SUBST(RUBY_LIB_VERSION)

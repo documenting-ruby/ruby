@@ -25,6 +25,7 @@ AUTOCONF = autoconf
 @SET_MAKE@
 MKFILES = @MAKEFILES@
 BASERUBY = @BASERUBY@
+HAVE_BASERUBY = @HAVE_BASERUBY@
 TEST_RUNNABLE = @TEST_RUNNABLE@
 CROSS_COMPILING = @CROSS_COMPILING@
 DOXYGEN = @DOXYGEN@
@@ -172,6 +173,7 @@ INSTALLED_LIST= .installed.list
 
 NEWLINE_C     = newline.c
 MINIPRELUDE_C = miniprelude.c
+PRELUDE_C     = prelude.c
 RBCONFIG      = .rbconfig.time
 
 SRC_FILE      = $<
@@ -199,7 +201,7 @@ all:
 miniruby$(EXEEXT):
 		@-if test -f $@; then $(MV) -f $@ $@.old; $(RM) $@.old; fi
 		$(ECHO) linking $@
-		$(Q) $(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(NORMALMAINOBJ) $(MINIOBJS) $(COMMONOBJS) $(DMYEXT) $(DTRACE_OBJ) $(MAINLIBS) $(LIBS) $(OUTFLAG)$@
+		$(Q) $(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(NORMALMAINOBJ) $(MINIOBJS) $(COMMONOBJS) $(INITOBJS) $(DTRACE_OBJ) $(MAINLIBS) $(LIBS) $(OUTFLAG)$@
 
 $(PROGRAM):
 		@$(RM) $@
@@ -213,7 +215,7 @@ $(PROGRAM):
 $(LIBRUBY_A):
 		@$(RM) $@
 		$(ECHO) linking static-library $@
-		$(Q) $(AR) $(ARFLAGS) $@ $(LIBRUBY_A_OBJS) $(DMYEXT)
+		$(Q) $(AR) $(ARFLAGS) $@ $(LIBRUBY_A_OBJS) $(INITOBJS)
 		@-$(RANLIB) $@ 2> /dev/null || true
 		$(ECHO) verifying static-library $@
 		@$(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(MAINOBJ) $(LIBRUBY_A) $(MAINLIBS) $(EXTLIBS) $(LIBS) $(OUTFLAG)conftest$(EXEEXT)
@@ -485,6 +487,8 @@ $(INSNS): $(srcdir)/insns.def vm_opts.h \
 	  $(srcdir)/tool/instruction.rb $(srcdir)/tool/insns2vm.rb
 	$(ECHO) generating $@
 	$(Q) $(BASERUBY) -Ku $(srcdir)/tool/insns2vm.rb $(INSNS2VMOPT) $@
+
+verconf.h: $(RBCONFIG)
 
 loadpath: verconf.h
 	@$(CPP) $(XCFLAGS) $(CPPFLAGS) $(srcdir)/loadpath.c | \

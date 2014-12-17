@@ -2753,15 +2753,25 @@ rb_thread_inspect(VALUE thread)
     return rb_thread_inspect_msg(thread, 1, 1, 1);
 }
 
+/* variables for recursive traversals */
+static ID recursive_key;
+
 static VALUE
 threadptr_local_aref(rb_thread_t *th, ID id)
 {
-    st_data_t val;
-
-    if (th->local_storage && st_lookup(th->local_storage, id, &val)) {
-	return (VALUE)val;
+    if (id == recursive_key) {
+	return th->local_storage_recursive_hash;
     }
-    return Qnil;
+    else {
+	st_data_t val;
+
+	if (th->local_storage && st_lookup(th->local_storage, id, &val)) {
+	    return (VALUE)val;
+	}
+	else {
+	    return Qnil;
+	}
+    }
 }
 
 VALUE
@@ -2843,16 +2853,22 @@ rb_thread_aref(VALUE thread, VALUE key)
 static VALUE
 threadptr_local_aset(rb_thread_t *th, ID id, VALUE val)
 {
-    if (NIL_P(val)) {
+    if (id == recursive_key) {
+	th->local_storage_recursive_hash = val;
+	return val;
+    }
+    else if (NIL_P(val)) {
 	if (!th->local_storage) return Qnil;
 	st_delete_wrap(th->local_storage, id);
 	return Qnil;
     }
-    if (!th->local_storage) {
-	th->local_storage = st_init_numtable();
+    else {
+	if (!th->local_storage) {
+	    th->local_storage = st_init_numtable();
+	}
+	st_insert(th->local_storage, id, val);
+	return val;
     }
-    st_insert(th->local_storage, id, val);
-    return val;
 }
 
 VALUE
@@ -3396,8 +3412,8 @@ rb_fd_set(int fd, rb_fdset_t *set)
 #endif
 
 static int
-do_select(int n, rb_fdset_t *read, rb_fdset_t *write, rb_fdset_t *except,
-	  struct timeval *timeout)
+do_select(int n, rb_fdset_t *readfds, rb_fdset_t *writefds,
+	  rb_fdset_t *exceptfds, struct timeval *timeout)
 {
     int UNINITIALIZED_VAR(result);
     int lerrno;
@@ -3415,18 +3431,19 @@ do_select(int n, rb_fdset_t *read, rb_fdset_t *write, rb_fdset_t *except,
 	timeout = &wait_rest;
     }
 
-    if (read)
-	rb_fd_init_copy(&orig_read, read);
-    if (write)
-	rb_fd_init_copy(&orig_write, write);
-    if (except)
-	rb_fd_init_copy(&orig_except, except);
+    if (readfds)
+	rb_fd_init_copy(&orig_read, readfds);
+    if (writefds)
+	rb_fd_init_copy(&orig_write, writefds);
+    if (exceptfds)
+	rb_fd_init_copy(&orig_except, exceptfds);
 
   retry:
     lerrno = 0;
 
     BLOCKING_REGION({
-	    result = native_fd_select(n, read, write, except, timeout, th);
+	    result = native_fd_select(n, readfds, writefds, exceptfds,
+				      timeout, th);
 	    if (result < 0) lerrno = errno;
 	}, ubf_select, th, FALSE);
 
@@ -3440,12 +3457,12 @@ do_select(int n, rb_fdset_t *read, rb_fdset_t *write, rb_fdset_t *except,
 #ifdef ERESTART
 	  case ERESTART:
 #endif
-	    if (read)
-		rb_fd_dup(read, &orig_read);
-	    if (write)
-		rb_fd_dup(write, &orig_write);
-	    if (except)
-		rb_fd_dup(except, &orig_except);
+	    if (readfds)
+		rb_fd_dup(readfds, &orig_read);
+	    if (writefds)
+		rb_fd_dup(writefds, &orig_write);
+	    if (exceptfds)
+		rb_fd_dup(exceptfds, &orig_except);
 
 	    if (timeout) {
 		double d = limit - timeofday();
@@ -3462,11 +3479,11 @@ do_select(int n, rb_fdset_t *read, rb_fdset_t *write, rb_fdset_t *except,
 	}
     }
 
-    if (read)
+    if (readfds)
 	rb_fd_term(&orig_read);
-    if (write)
+    if (writefds)
 	rb_fd_term(&orig_write);
-    if (except)
+    if (exceptfds)
 	rb_fd_term(&orig_except);
 
     return result;
@@ -3896,7 +3913,7 @@ thgroup_memsize(const void *ptr)
 static const rb_data_type_t thgroup_data_type = {
     "thgroup",
     {NULL, RUBY_TYPED_DEFAULT_FREE, thgroup_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 /*
@@ -4118,7 +4135,7 @@ mutex_memsize(const void *ptr)
 static const rb_data_type_t mutex_data_type = {
     "mutex",
     {mutex_mark, mutex_free, mutex_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 VALUE
@@ -4568,7 +4585,7 @@ thread_shield_mark(void *ptr)
 static const rb_data_type_t thread_shield_data_type = {
     "thread_shield",
     {thread_shield_mark, 0, 0,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static VALUE
@@ -4659,11 +4676,6 @@ rb_thread_shield_destroy(VALUE self)
     return rb_thread_shield_waiting(self) > 0 ? Qtrue : Qfalse;
 }
 
-/* variables for recursive traversals */
-static ID recursive_key;
-
-extern const struct st_hash_type st_hashtype_num;
-
 static VALUE
 ident_hash_new(void)
 {
@@ -4672,6 +4684,20 @@ ident_hash_new(void)
     return hash;
 }
 
+static VALUE
+threadptr_recursive_hash(rb_thread_t *th)
+{
+    return th->local_storage_recursive_hash;
+}
+
+static void
+threadptr_recursive_hash_set(rb_thread_t *th, VALUE hash)
+{
+    th->local_storage_recursive_hash = hash;
+}
+
+ID rb_frame_last_func(void);
+
 /*
  * Returns the current "recursive list" used to detect recursion.
  * This list is a hash table, unique for the current thread and for
@@ -4679,14 +4705,14 @@ ident_hash_new(void)
  */
 
 static VALUE
-recursive_list_access(void)
+recursive_list_access(VALUE sym)
 {
-    volatile VALUE hash = rb_thread_local_aref(rb_thread_current(), recursive_key);
-    VALUE sym = ID2SYM(rb_frame_this_func());
+    rb_thread_t *th = GET_THREAD();
+    VALUE hash = threadptr_recursive_hash(th);
     VALUE list;
     if (NIL_P(hash) || !RB_TYPE_P(hash, T_HASH)) {
 	hash = ident_hash_new();
-	rb_thread_local_aset(rb_thread_current(), recursive_key, hash);
+	threadptr_recursive_hash_set(th, hash);
 	list = Qnil;
     }
     else {
@@ -4697,20 +4723,6 @@ recursive_list_access(void)
 	rb_hash_aset(hash, sym, list);
     }
     return list;
-}
-
-VALUE
-rb_threadptr_reset_recursive_data(rb_thread_t *th)
-{
-    VALUE old = threadptr_local_aref(th, recursive_key);
-    threadptr_local_aset(th, recursive_key, Qnil);
-    return old;
-}
-
-void
-rb_threadptr_restore_recursive_data(rb_thread_t *th, VALUE old)
-{
-    threadptr_local_aset(th, recursive_key, old);
 }
 
 /*
@@ -4784,25 +4796,23 @@ recursive_push(VALUE list, VALUE obj, VALUE paired_obj)
  * Assumes the recursion list is valid.
  */
 
-static void
+static int
 recursive_pop(VALUE list, VALUE obj, VALUE paired_obj)
 {
     if (paired_obj) {
 	VALUE pair_list = rb_hash_lookup2(list, obj, Qundef);
 	if (pair_list == Qundef) {
-	    VALUE symname = rb_inspect(ID2SYM(rb_frame_this_func()));
-	    VALUE thrname = rb_inspect(rb_thread_current());
-	    rb_raise(rb_eTypeError, "invalid inspect_tbl pair_list for %s in %s",
-		     StringValuePtr(symname), StringValuePtr(thrname));
+	    return 0;
 	}
 	if (RB_TYPE_P(pair_list, T_HASH)) {
 	    rb_hash_delete(pair_list, paired_obj);
 	    if (!RHASH_EMPTY_P(pair_list)) {
-		return; /* keep hash until is empty */
+		return 1; /* keep hash until is empty */
 	    }
 	}
     }
     rb_hash_delete(list, obj);
+    return 1;
 }
 
 struct exec_recursive_params {
@@ -4836,9 +4846,11 @@ static VALUE
 exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE pairid, VALUE arg, int outer)
 {
     VALUE result = Qundef;
+    const ID mid = rb_frame_last_func();
+    const VALUE sym = mid ? ID2SYM(mid) : ID2SYM(idNULL);
     struct exec_recursive_params p;
     int outermost;
-    p.list = recursive_list_access();
+    p.list = recursive_list_access(sym);
     p.objid = rb_obj_id(obj);
     p.obj = obj;
     p.pairid = pairid;
@@ -4860,8 +4872,8 @@ exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE pairid, VALUE
 	    recursive_push(p.list, ID2SYM(recursive_key), 0);
 	    recursive_push(p.list, p.objid, p.pairid);
 	    result = rb_catch_protect(p.list, exec_recursive_i, (VALUE)&p, &state);
-	    recursive_pop(p.list, p.objid, p.pairid);
-	    recursive_pop(p.list, ID2SYM(recursive_key), 0);
+	    if (!recursive_pop(p.list, p.objid, p.pairid)) goto invalid;
+	    if (!recursive_pop(p.list, ID2SYM(recursive_key), 0)) goto invalid;
 	    if (state) JUMP_TAG(state);
 	    if (result == p.list) {
 		result = (*func)(obj, arg, TRUE);
@@ -4874,7 +4886,12 @@ exec_recursive(VALUE (*func) (VALUE, VALUE, int), VALUE obj, VALUE pairid, VALUE
 		result = (*func)(obj, arg, FALSE);
 	    }
 	    POP_TAG();
-	    recursive_pop(p.list, p.objid, p.pairid);
+	    if (!recursive_pop(p.list, p.objid, p.pairid)) {
+	      invalid:
+		rb_raise(rb_eTypeError, "invalid inspect_tbl pair_list "
+			 "for %+"PRIsVALUE" in %+"PRIsVALUE,
+			 sym, rb_thread_current());
+	    }
 	    if (state) JUMP_TAG(state);
 	}
     }

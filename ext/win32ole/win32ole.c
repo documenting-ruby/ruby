@@ -97,7 +97,8 @@ static void load_conv_function51932(void);
 static UINT ole_init_cp(void);
 static void ole_freeexceptinfo(EXCEPINFO *pExInfo);
 static VALUE ole_excepinfo2msg(EXCEPINFO *pExInfo);
-static void ole_free(struct oledata *pole);
+static void ole_free(void *ptr);
+static size_t ole_size(const void *ptr);
 static LPWSTR ole_mb2wc(char *pm, int len);
 static VALUE ole_ary_m_entry(VALUE val, LONG *pid);
 static VALUE is_all_index_under(LONG *pid, long *pub, long dim);
@@ -167,6 +168,22 @@ static VALUE fole_activex_initialize(VALUE self);
 
 static void init_enc2cp(void);
 static void free_enc2cp(void);
+
+static void com_hash_free(void *ptr);
+static void com_hash_mark(void *ptr);
+static size_t com_hash_size(const void *ptr);
+
+static const rb_data_type_t ole_datatype = {
+    "win32ole",
+    {NULL, ole_free, ole_size,},
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+static const rb_data_type_t com_hash_datatype = {
+    "com_hash",
+    {com_hash_mark, com_hash_free, com_hash_size,},
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
+};
 
 static HRESULT (STDMETHODCALLTYPE mf_QueryInterface)(
     IMessageFilter __RPC_FAR * This,
@@ -386,7 +403,6 @@ val2dispatch(VALUE val)
     struct st_table *tbl = DATA_PTR(com_hash);
     Win32OLEIDispatch* pdisp;
     st_data_t data;
-
     if (st_lookup(tbl, val, &data)) {
         pdisp = (Win32OLEIDispatch *)(data & ~FIXNUM_FLAG);
         pdisp->refcount++;
@@ -813,10 +829,24 @@ ole_initialize(void)
 }
 
 static void
-ole_free(struct oledata *pole)
+ole_free(void *ptr)
 {
+    struct oledata *pole = ptr;
     OLE_FREE(pole->pDispatch);
     free(pole);
+}
+
+static size_t ole_size(const void *ptr)
+{
+    return ptr ? sizeof(struct oledata) : 0;
+}
+
+struct oledata *
+oledata_get_struct(VALUE ole)
+{
+    struct oledata *pole;
+    TypedData_Get_Struct(ole, struct oledata, &ole_datatype, pole);
+    return pole;
 }
 
 LPWSTR
@@ -1216,18 +1246,16 @@ ole_val_ary2variant_ary(VALUE val, VARIANT *var, VARTYPE vt)
 void
 ole_val2variant(VALUE val, VARIANT *var)
 {
-    struct oledata *pole;
-    struct olevariantdata *pvar;
+    struct oledata *pole = NULL;
     if(rb_obj_is_kind_of(val, cWIN32OLE)) {
-        Data_Get_Struct(val, struct oledata, pole);
+        pole = oledata_get_struct(val);
         OLE_ADDREF(pole->pDispatch);
         V_VT(var) = VT_DISPATCH;
         V_DISPATCH(var) = pole->pDispatch;
         return;
     }
     if (rb_obj_is_kind_of(val, cWIN32OLE_VARIANT)) {
-        Data_Get_Struct(val, struct olevariantdata, pvar);
-        VariantCopy(var, &(pvar->var));
+        ole_variant2variant(val, var);
         return;
     }
     if (rb_obj_is_kind_of(val, cWIN32OLE_RECORD)) {
@@ -1312,8 +1340,8 @@ default_inspect(VALUE self, const char *class_name)
 static VALUE
 ole_set_member(VALUE self, IDispatch *dispatch)
 {
-    struct oledata *pole;
-    Data_Get_Struct(self, struct oledata, pole);
+    struct oledata *pole = NULL;
+    pole = oledata_get_struct(self);
     if (pole->pDispatch) {
         OLE_RELEASE(pole->pDispatch);
         pole->pDispatch = NULL;
@@ -1329,7 +1357,7 @@ fole_s_allocate(VALUE klass)
     struct oledata *pole;
     VALUE obj;
     ole_initialize();
-    obj = Data_Make_Struct(klass,struct oledata,0,ole_free,pole);
+    obj = TypedData_Make_Struct(klass, struct oledata, &ole_datatype, pole);
     pole->pDispatch = NULL;
     return obj;
 }
@@ -2009,7 +2037,7 @@ fole_s_const_load(int argc, VALUE *argv, VALUE self)
 {
     VALUE ole;
     VALUE klass;
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     ITypeInfo *pTypeInfo;
     ITypeLib *pTypeLib;
     unsigned int index;
@@ -2025,7 +2053,7 @@ fole_s_const_load(int argc, VALUE *argv, VALUE self)
         rb_raise(rb_eTypeError, "2nd parameter must be Class or Module");
     }
     if (rb_obj_is_kind_of(ole, cWIN32OLE)) {
-        OLEData_Get_Struct(ole, pole);
+        pole = oledata_get_struct(ole);
         hr = pole->pDispatch->lpVtbl->GetTypeInfo(pole->pDispatch,
                                                   0, lcid, &pTypeInfo);
         if(FAILED(hr)) {
@@ -2091,8 +2119,8 @@ reference_count(struct oledata * pole)
 static VALUE
 fole_s_reference_count(VALUE self, VALUE obj)
 {
-    struct oledata * pole;
-    OLEData_Get_Struct(obj, pole);
+    struct oledata * pole = NULL;
+    pole = oledata_get_struct(obj);
     return INT2NUM(reference_count(pole));
 }
 
@@ -2109,8 +2137,8 @@ static VALUE
 fole_s_free(VALUE self, VALUE obj)
 {
     ULONG n = 0;
-    struct oledata * pole;
-    OLEData_Get_Struct(obj, pole);
+    struct oledata * pole = NULL;
+    pole = oledata_get_struct(obj);
     if(pole->pDispatch) {
         if (reference_count(pole) > 0) {
             n = OLE_RELEASE(pole->pDispatch);
@@ -2518,7 +2546,7 @@ static VALUE
 ole_invoke(int argc, VALUE *argv, VALUE self, USHORT wFlags, BOOL is_bracket)
 {
     LCID    lcid = cWIN32OLE_lcid;
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     HRESULT hr;
     VALUE cmd;
     VALUE paramS;
@@ -2538,7 +2566,6 @@ ole_invoke(int argc, VALUE *argv, VALUE self, USHORT wFlags, BOOL is_bracket)
     unsigned int cNamedArgs;
     int n;
     struct oleparam op;
-    struct olevariantdata *pvar;
     memset(&excepinfo, 0, sizeof(EXCEPINFO));
 
     VariantInit(&result);
@@ -2555,7 +2582,7 @@ ole_invoke(int argc, VALUE *argv, VALUE self, USHORT wFlags, BOOL is_bracket)
     if (RB_TYPE_P(cmd, T_SYMBOL)) {
 	cmd = rb_sym_to_s(cmd);
     }
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
     if(!pole->pDispatch) {
         rb_raise(rb_eRuntimeError, "failed to get dispatch interface");
     }
@@ -2633,8 +2660,7 @@ ole_invoke(int argc, VALUE *argv, VALUE self, USHORT wFlags, BOOL is_bracket)
             VariantInit(&op.dp.rgvarg[n]);
             param = rb_ary_entry(paramS, i-cNamedArgs);
             if (rb_obj_is_kind_of(param, cWIN32OLE_VARIANT)) {
-                Data_Get_Struct(param, struct olevariantdata, pvar);
-                VariantCopy(&op.dp.rgvarg[n], &(pvar->var));
+                ole_variant2variant(param, &op.dp.rgvarg[n]);
             } else {
                 ole_val2variant(param, &realargs[n]);
                 V_VT(&op.dp.rgvarg[n]) = VT_VARIANT | VT_BYREF;
@@ -2777,7 +2803,7 @@ static VALUE
 ole_invoke2(VALUE self, VALUE dispid, VALUE args, VALUE types, USHORT dispkind)
 {
     HRESULT hr;
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     unsigned int argErr = 0;
     EXCEPINFO excepinfo;
     VARIANT result;
@@ -2795,7 +2821,7 @@ ole_invoke2(VALUE self, VALUE dispid, VALUE args, VALUE types, USHORT dispkind)
     memset(&excepinfo, 0, sizeof(EXCEPINFO));
     memset(&dispParams, 0, sizeof(DISPPARAMS));
     VariantInit(&result);
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
 
     dispParams.cArgs = RARRAY_LEN(args);
     dispParams.rgvarg = ALLOCA_N(VARIANTARG, dispParams.cArgs);
@@ -3085,7 +3111,7 @@ fole_getproperty_with_bracket(int argc, VALUE *argv, VALUE self)
 static VALUE
 ole_propertyput(VALUE self, VALUE property, VALUE value)
 {
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     unsigned argErr;
     unsigned int index;
     HRESULT hr;
@@ -3107,7 +3133,7 @@ ole_propertyput(VALUE self, VALUE property, VALUE value)
     VariantInit(&propertyValue[1]);
     memset(&excepinfo, 0, sizeof(excepinfo));
 
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
 
     /* get ID from property name */
     pBuf[0]  = ole_vstr2wc(property);
@@ -3151,8 +3177,8 @@ ole_propertyput(VALUE self, VALUE property, VALUE value)
 static VALUE
 fole_free(VALUE self)
 {
-    struct oledata *pole;
-    OLEData_Get_Struct(self, pole);
+    struct oledata *pole = NULL;
+    pole = oledata_get_struct(self);
     OLE_FREE(pole->pDispatch);
     pole->pDispatch = NULL;
     return Qnil;
@@ -3201,7 +3227,7 @@ fole_each(VALUE self)
 {
     LCID    lcid = cWIN32OLE_lcid;
 
-    struct oledata *pole;
+    struct oledata *pole = NULL;
 
     unsigned int argErr;
     EXCEPINFO excepinfo;
@@ -3220,7 +3246,7 @@ fole_each(VALUE self)
     dispParams.cArgs = 0;
     memset(&excepinfo, 0, sizeof(excepinfo));
 
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
     hr = pole->pDispatch->lpVtbl->Invoke(pole->pDispatch, DISPID_NEWENUM,
                                          &IID_NULL, lcid,
                                          DISPATCH_METHOD | DISPATCH_PROPERTYGET,
@@ -3336,9 +3362,9 @@ ole_methods(VALUE self, int mask)
     ITypeInfo *pTypeInfo;
     HRESULT hr;
     VALUE methods;
-    struct oledata *pole;
+    struct oledata *pole = NULL;
 
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
     methods = rb_ary_new();
 
     hr = typeinfo_from_ole(pole, &pTypeInfo);
@@ -3429,11 +3455,11 @@ fole_type(VALUE self)
 {
     ITypeInfo *pTypeInfo;
     HRESULT hr;
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     LCID  lcid = cWIN32OLE_lcid;
     VALUE type = Qnil;
 
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
 
     hr = pole->pDispatch->lpVtbl->GetTypeInfo( pole->pDispatch, 0, lcid, &pTypeInfo );
     if(FAILED(hr)) {
@@ -3461,13 +3487,13 @@ fole_type(VALUE self)
 static VALUE
 fole_typelib(VALUE self)
 {
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     HRESULT hr;
     ITypeInfo *pTypeInfo;
     LCID  lcid = cWIN32OLE_lcid;
     VALUE vtlib = Qnil;
 
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
     hr = pole->pDispatch->lpVtbl->GetTypeInfo(pole->pDispatch,
                                               0, lcid, &pTypeInfo);
     if(FAILED(hr)) {
@@ -3497,7 +3523,7 @@ fole_query_interface(VALUE self, VALUE str_iid)
     HRESULT hr;
     OLECHAR *pBuf;
     IID iid;
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     IDispatch *pDispatch;
     void *p;
 
@@ -3510,7 +3536,7 @@ fole_query_interface(VALUE self, VALUE str_iid)
                   StringValuePtr(str_iid));
     }
 
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
     if(!pole->pDispatch) {
         rb_raise(rb_eRuntimeError, "failed to get dispatch interface");
     }
@@ -3539,7 +3565,7 @@ fole_query_interface(VALUE self, VALUE str_iid)
 static VALUE
 fole_respond_to(VALUE self, VALUE method)
 {
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     BSTR wcmdname;
     DISPID DispID;
     HRESULT hr;
@@ -3549,7 +3575,7 @@ fole_respond_to(VALUE self, VALUE method)
     if (RB_TYPE_P(method, T_SYMBOL)) {
         method = rb_sym_to_s(method);
     }
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
     wcmdname = ole_vstr2wc(method);
     hr = pole->pDispatch->lpVtbl->GetIDsOfNames( pole->pDispatch, &IID_NULL,
 	    &wcmdname, 1, cWIN32OLE_lcid, &DispID);
@@ -3752,11 +3778,11 @@ fole_method_help(VALUE self, VALUE cmdname)
 {
     ITypeInfo *pTypeInfo;
     HRESULT hr;
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     VALUE obj;
 
     SafeStringValue(cmdname);
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
     hr = typeinfo_from_ole(pole, &pTypeInfo);
     if(FAILED(hr))
         ole_raise(hr, rb_eRuntimeError, "failed to get ITypeInfo");
@@ -3793,13 +3819,13 @@ fole_method_help(VALUE self, VALUE cmdname)
 static VALUE
 fole_activex_initialize(VALUE self)
 {
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     IPersistMemory *pPersistMemory;
     void *p;
 
     HRESULT hr = S_OK;
 
-    OLEData_Get_Struct(self, pole);
+    pole = oledata_get_struct(self);
 
     hr = pole->pDispatch->lpVtbl->QueryInterface(pole->pDispatch, &IID_IPersistMemory, &p);
     pPersistMemory = p;
@@ -3823,10 +3849,10 @@ typelib_from_val(VALUE obj, ITypeLib **pTypeLib)
 {
     LCID lcid = cWIN32OLE_lcid;
     HRESULT hr;
-    struct oledata *pole;
+    struct oledata *pole = NULL;
     unsigned int index;
     ITypeInfo *pTypeInfo;
-    OLEData_Get_Struct(obj, pole);
+    pole = oledata_get_struct(obj);
     hr = pole->pDispatch->lpVtbl->GetTypeInfo(pole->pDispatch,
                                               0, lcid, &pTypeInfo);
     if (FAILED(hr)) {
@@ -3847,6 +3873,27 @@ static void
 free_enc2cp(void)
 {
     st_free_table(enc2cp_table);
+}
+
+static void
+com_hash_free(void *ptr)
+{
+    st_table *tbl = ptr;
+    st_free_table(tbl);
+}
+
+static void
+com_hash_mark(void *ptr)
+{
+    st_table *tbl = ptr;
+    rb_mark_hash(tbl);
+}
+
+static size_t
+com_hash_size(const void *ptr)
+{
+    const st_table *tbl = ptr;
+    return tbl ? st_memsize(tbl) : 0;
 }
 
 void
@@ -3870,7 +3917,7 @@ Init_win32ole(void)
     message_filter.RetryRejectedCall = mf_RetryRejectedCall;
     message_filter.MessagePending = mf_MessagePending;
 
-    com_hash = Data_Wrap_Struct(rb_cData, rb_mark_hash, st_free_table, st_init_numtable());
+    com_hash = TypedData_Wrap_Struct(rb_cData, &com_hash_datatype, st_init_numtable());
     rb_gc_register_mark_object(com_hash);
 
     cWIN32OLE = rb_define_class("WIN32OLE", rb_cObject);

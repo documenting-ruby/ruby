@@ -8,6 +8,7 @@ NULL = nul
 CHDIR = cd
 PATH_SEPARATOR = ;
 TZ =				# skip timezone tests
+PWD = $(MAKEDIR)
 
 !ifndef MFLAGS
 MFLAGS=-l
@@ -86,11 +87,10 @@ BASERUBY = ruby
 TEST_RUNNABLE = yes
 !endif
 
-!if !defined(PROCESSOR_ARCHITECTURE)
-PROCESSOR_ARCHITECTURE = x86
+!if !defined(MACHINE)
+MACHINE = x86
 !endif
-MACHINE = $(PROCESSOR_ARCHITECTURE)
-!if "$(PROCESSOR_ARCHITECTURE)" == "x86"
+!if "$(MACHINE)" == "x86"
 !if !defined(PROCESSOR_LEVEL)
 PROCESSOR_LEVEL = 5
 !endif
@@ -103,8 +103,8 @@ PROCESSOR_FLAG = -G$(PROCESSOR_LEVEL)
 CPU = i$(PROCESSOR_LEVEL)86
 ARCH = i386
 !else
-CPU = $(PROCESSOR_ARCHITECTURE)
-ARCH = $(PROCESSOR_ARCHITECTURE)
+CPU = $(MACHINE)
+ARCH = $(MACHINE)
 !endif
 !if !defined(DEBUGFLAGS)
 DEBUGFLAGS = -Zi
@@ -362,9 +362,13 @@ EXTOBJS = ext/extinit.$(OBJEXT)
 ! if !defined(ENCSTATIC)
 ENCSTATIC = static
 ! endif
+!else
+ENCOBJS = dmyenc.$(OBJEXT)
+EXTOBJS = dmyext.$(OBJEXT)
 !endif
 
 arch_hdrdir = $(EXTOUT)/include/$(arch)
+top_srcdir = $(srcdir)
 hdrdir = $(srcdir)/include
 VPATH = $(arch_hdrdir)/ruby;$(hdrdir)/ruby;$(srcdir);$(srcdir)/enc;$(srcdir)/missing;$(win_srcdir)
 
@@ -403,6 +407,11 @@ NEWLINE_C = newline.c
 MINIPRELUDE_C = $(srcdir)/miniprelude.c
 !else
 MINIPRELUDE_C = miniprelude.c
+!endif
+!if !exist(prelude.c) && exist($(srcdir)/prelude.c)
+PRELUDE_C = $(srcdir)/prelude.c
+!else
+PRELUDE_C = prelude.c
 !endif
 RBCONFIG      = ./.rbconfig.time
 
@@ -929,7 +938,7 @@ miniruby: miniruby$(EXEEXT)
 miniruby$(EXEEXT):
 		@echo $(LIBS)
 		$(ECHO) linking $(@:\=/)
-		$(Q) $(PURIFY) $(CC) $(MAINOBJ) $(MINIOBJS) $(COMMONOBJS) $(DMYEXT) $(LIBS) -Fe$@ -link $(LDFLAGS)
+		$(Q) $(PURIFY) $(CC) $(MAINOBJ) $(MINIOBJS) $(COMMONOBJS) $(INITOBJS) $(LIBS) -Fe$@ -link $(LDFLAGS)
 		@$(RM) miniruby.lib miniruby.exp
 		$(Q) miniruby.exe -v
 		$(Q) $(LDSHARED_1)
@@ -969,9 +978,9 @@ $(STUBPROGRAM):	stub.$(OBJEXT) $(LIBRUBY) $(LIBRUBY_SO) $(RUBY_INSTALL_NAME).res
 		$(Q) $(LDSHARED_2)
 !endif
 
-$(LIBRUBY_A):	$(OBJS) $(DMYEXT)
+$(LIBRUBY_A):	$(OBJS) $(INITOBJS)
 		$(ECHO) linking static-library $(@:\=/)
-		$(Q) $(AR) $(ARFLAGS)$@ $(OBJS) $(DMYEXT)
+		$(Q) $(AR) $(ARFLAGS)$@ $(OBJS) $(INITOBJS)
 
 $(LIBRUBY):	$(RUBYDEF)
 		$(ECHO) linking import-library $(@:\=/)
@@ -1156,6 +1165,8 @@ INSNS	= opt_sc.inc optinsn.inc optunifs.inc insns.inc insns_info.inc \
 ! if [del insns_rules.mk > nul]
 ! endif
 !endif
+
+verconf.h: verconf.mk
 
 loadpath: verconf.h
 	@$(CPP) $(XCFLAGS) $(CPPFLAGS) $(srcdir)/loadpath.c | \

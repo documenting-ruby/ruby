@@ -61,8 +61,10 @@ static size_t memsize(const void *ptr)
 static const rb_data_type_t psych_parser_type = {
     "Psych/parser",
     {0, dealloc, 0,},
-    NULL, NULL,
+    0, 0,
+#ifdef RUBY_TYPED_FREE_IMMEDIATELY
     RUBY_TYPED_FREE_IMMEDIATELY,
+#endif
 };
 
 static VALUE allocate(VALUE klass)

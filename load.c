@@ -2,9 +2,8 @@
  * load methods from eval.c
  */
 
-#include "ruby/ruby.h"
-#include "ruby/util.h"
 #include "internal.h"
+#include "ruby/util.h"
 #include "dln.h"
 #include "eval_intern.h"
 #include "probes.h"
@@ -683,7 +682,7 @@ rb_load_protect(VALUE fname, int wrap, int *state)
 static VALUE
 rb_f_load(int argc, VALUE *argv)
 {
-    VALUE fname, wrap, path;
+    VALUE fname, wrap, path, orig_fname;
 
     rb_scan_args(argc, argv, "11", &fname, &wrap);
 
@@ -693,10 +692,12 @@ rb_f_load(int argc, VALUE *argv)
 			       rb_sourceline());
     }
 
-    path = rb_find_file(FilePathValue(fname));
+    orig_fname = FilePathValue(fname);
+    fname = rb_str_encode_ospath(orig_fname);
+    path = rb_find_file(fname);
     if (!path) {
 	if (!rb_file_load_ok(RSTRING_PTR(fname)))
-	    load_failed(fname);
+	    load_failed(orig_fname);
 	path = fname;
     }
     rb_load_internal(path, RTEST(wrap));
@@ -939,10 +940,17 @@ load_ext(VALUE path)
     return (VALUE)dln_load(RSTRING_PTR(path));
 }
 
-VALUE
-rb_require_safe(VALUE fname, int safe)
+/*
+ * returns
+ *  0: if already loaded (false)
+ *  1: successfully loaded (true)
+ * <0: not found (LoadError)
+ * >1: exception
+ */
+int
+rb_require_internal(VALUE fname, int safe)
 {
-    volatile VALUE result = Qnil;
+    volatile int result = -1;
     rb_thread_t *th = GET_THREAD();
     volatile VALUE errinfo = th->errinfo;
     int state;
@@ -984,11 +992,11 @@ rb_require_safe(VALUE fname, int safe)
 	}
 	if (found) {
 	    if (!path || !(ftptr = load_lock(RSTRING_PTR(path)))) {
-		result = Qfalse;
+		result = 0;
 	    }
 	    else if (!*ftptr) {
 		rb_provide_feature(path);
-		result = Qtrue;
+		result = 1;
 	    }
 	    else {
 		switch (found) {
@@ -1003,7 +1011,7 @@ rb_require_safe(VALUE fname, int safe)
 		    break;
 		}
 		rb_provide_feature(path);
-		result = Qtrue;
+		result = 1;
 	    }
 	}
     }
@@ -1012,11 +1020,8 @@ rb_require_safe(VALUE fname, int safe)
 
     rb_set_safe_level_force(saved.safe);
     if (state) {
-	JUMP_TAG(state);
-    }
-
-    if (NIL_P(result)) {
-	load_failed(fname);
+	/* never TAG_RETURN */
+	return state;
     }
 
     th->errinfo = errinfo;
@@ -1028,6 +1033,32 @@ rb_require_safe(VALUE fname, int safe)
     }
 
     return result;
+}
+
+int
+ruby_require_internal(const char *fname, unsigned int len)
+{
+    struct RString fake;
+    VALUE str = rb_setup_fake_str(&fake, fname, len, 0);
+    int result = rb_require_internal(str, 0);
+    if (result > 1) result = -1;
+    rb_set_errinfo(Qnil);
+    return result;
+}
+
+VALUE
+rb_require_safe(VALUE fname, int safe)
+{
+    int result = rb_require_internal(fname, safe);
+
+    if (result > 1) {
+	JUMP_TAG(result);
+    }
+    if (result < 0) {
+	load_failed(fname);
+    }
+
+    return result ? Qtrue : Qfalse;
 }
 
 VALUE
@@ -1049,7 +1080,6 @@ register_init_ext(st_data_t *key, st_data_t *value, st_data_t init, int existing
     else {
 	*value = (st_data_t)NEW_MEMO(init, 0, 0);
 	*key = (st_data_t)ruby_strdup(name);
-	(*(void (*)(void))init)();
     }
     return ST_CONTINUE;
 }
@@ -1065,7 +1095,6 @@ ruby_init_ext(const char *name, void (*init)(void))
 	GET_VM()->loading_table = loading_tbl = st_init_strtable();
     }
     st_update(loading_tbl, (st_data_t)name, register_init_ext, (st_data_t)init);
-    rb_provide(name);
 }
 
 /*

@@ -108,6 +108,7 @@ int rb_w32_wait_events(HANDLE *events, int num, DWORD timeout);
 static int rb_w32_open_osfhandle(intptr_t osfhandle, int flags);
 static int wstati64(const WCHAR *path, struct stati64 *st);
 VALUE rb_w32_conv_from_wchar(const WCHAR *wstr, rb_encoding *enc);
+int ruby_brace_glob_with_enc(const char *str, int flags, ruby_glob_func *func, VALUE arg, rb_encoding *enc);
 
 #define RUBY_CRITICAL(expr) do { expr; } while (0)
 
@@ -546,11 +547,15 @@ init_env(void)
 	if (!GetEnvironmentVariableW(L"USERNAME", env, numberof(env)) &&
 	    !GetUserNameW(env, (len = numberof(env), &len))) {
 	    NTLoginName = "<Unknown>";
-	    return;
 	}
-	set_env_val(L"USER");
+	else {
+	    set_env_val(L"USER");
+	    NTLoginName = rb_w32_wstr_to_mbstr(CP_UTF8, env, -1, NULL);
+	}
     }
-    NTLoginName = strdup(rb_w32_getenv("USER"));
+    else {
+	NTLoginName = rb_w32_wstr_to_mbstr(CP_UTF8, env, -1, NULL);
+    }
 
     if (!GetEnvironmentVariableW(TMPDIR, env, numberof(env)) &&
 	!GetEnvironmentVariableW(L"TMP", env, numberof(env)) &&
@@ -739,7 +744,7 @@ socklist_delete(SOCKET *sockp, int *flagp)
     return ret;
 }
 
-static int w32_cmdvector(const WCHAR *, char ***, UINT);
+static int w32_cmdvector(const WCHAR *, char ***, UINT, rb_encoding *);
 //
 // Initialization stuff
 //
@@ -763,7 +768,7 @@ rb_w32_sysinit(int *argc, char ***argv)
     //
     // subvert cmd.exe's feeble attempt at command line parsing
     //
-    *argc = w32_cmdvector(GetCommandLineW(), argv, CP_ACP);
+    *argc = w32_cmdvector(GetCommandLineW(), argv, CP_UTF8, rb_utf8_encoding());
 
     //
     // Now set up the correct time stuff
@@ -1316,9 +1321,9 @@ w32_spawn(int mode, const char *cmd, const char *prog, UINT cp)
     }
 
     if (!e && shell && !(wshell = mbstr_to_wstr(cp, shell, -1, NULL))) e = E2BIG;
-    if (v2) ALLOCV_END(v2);
     if (cmd_sep) *cmd_sep = sep;
     if (!e && cmd && !(wcmd = mbstr_to_wstr(cp, cmd, -1, NULL))) e = E2BIG;
+    if (v2) ALLOCV_END(v2);
     if (v) ALLOCV_END(v);
 
     if (!e) {
@@ -1482,7 +1487,7 @@ insert(const char *path, VALUE vinfo, void *enc)
 
 /* License: Artistic or GPL */
 static NtCmdLineElement **
-cmdglob(NtCmdLineElement *patt, NtCmdLineElement **tail, UINT cp)
+cmdglob(NtCmdLineElement *patt, NtCmdLineElement **tail, UINT cp, rb_encoding *enc)
 {
     char buffer[MAXPATHLEN], *buf = buffer;
     NtCmdLineElement **last = tail;
@@ -1494,7 +1499,7 @@ cmdglob(NtCmdLineElement *patt, NtCmdLineElement **tail, UINT cp)
     strlcpy(buf, patt->str, patt->len + 1);
     buf[patt->len] = '\0';
     translate_char(buf, '\\', '/', cp);
-    status = ruby_brace_glob(buf, 0, insert, (VALUE)&tail);
+    status = ruby_brace_glob_with_enc(buf, 0, insert, (VALUE)&tail, enc);
     if (buf != buffer)
 	free(buf);
 
@@ -1570,7 +1575,7 @@ skipspace(WCHAR *ptr)
 
 /* License: Artistic or GPL */
 static int
-w32_cmdvector(const WCHAR *cmd, char ***vec, UINT cp)
+w32_cmdvector(const WCHAR *cmd, char ***vec, UINT cp, rb_encoding *enc)
 {
     int globbing, len;
     int elements, strsz, done;
@@ -1738,7 +1743,7 @@ w32_cmdvector(const WCHAR *cmd, char ***vec, UINT cp)
 	curr->str = rb_w32_wstr_to_mbstr(cp, base, len, &curr->len);
 	curr->flags |= NTMALLOC;
 
-	if (globbing && (tail = cmdglob(curr, cmdtail, cp))) {
+	if (globbing && (tail = cmdglob(curr, cmdtail, cp, enc))) {
 	    cmdtail = tail;
 	}
 	else {
@@ -2029,9 +2034,10 @@ move_to_next_entry(DIR *dirp)
 //
 /* License: Ruby's */
 static BOOL
-win32_direct_conv(const WCHAR *file, struct direct *entry, rb_encoding *dummy)
+win32_direct_conv(const WCHAR *file, struct direct *entry, const void *enc)
 {
-    if (!(entry->d_name = wstr_to_filecp(file, &entry->d_namlen)))
+    UINT cp = *((UINT *)enc);
+    if (!(entry->d_name = wstr_to_mbstr(cp, file, -1, &entry->d_namlen)))
 	return FALSE;
     return TRUE;
 }
@@ -2084,7 +2090,7 @@ rb_w32_conv_from_wstr(const WCHAR *wstr, long *lenp, rb_encoding *enc)
 
 /* License: Ruby's */
 static BOOL
-ruby_direct_conv(const WCHAR *file, struct direct *entry, rb_encoding *enc)
+ruby_direct_conv(const WCHAR *file, struct direct *entry, const void *enc)
 {
     if (!(entry->d_name = rb_w32_conv_from_wstr(file, &entry->d_namlen, enc)))
 	return FALSE;
@@ -2093,7 +2099,7 @@ ruby_direct_conv(const WCHAR *file, struct direct *entry, rb_encoding *enc)
 
 /* License: Artistic or GPL */
 static struct direct *
-readdir_internal(DIR *dirp, BOOL (*conv)(const WCHAR *, struct direct *, rb_encoding *), rb_encoding *enc)
+readdir_internal(DIR *dirp, BOOL (*conv)(const WCHAR *, struct direct *, const void *), const void *enc)
 {
     static int dummy = 0;
 
@@ -2134,8 +2140,14 @@ readdir_internal(DIR *dirp, BOOL (*conv)(const WCHAR *, struct direct *, rb_enco
 struct direct  *
 rb_w32_readdir(DIR *dirp, rb_encoding *enc)
 {
-    if (!enc || enc == rb_ascii8bit_encoding())
-	return readdir_internal(dirp, win32_direct_conv, NULL);
+    if (!enc || enc == rb_ascii8bit_encoding()) {
+	const UINT cp = filecp();
+	return readdir_internal(dirp, win32_direct_conv, &cp);
+    }
+    else if (enc == rb_utf8_encoding()) {
+	const UINT cp = CP_UTF8;
+	return readdir_internal(dirp, win32_direct_conv, &cp);
+    }
     else
 	return readdir_internal(dirp, ruby_direct_conv, enc);
 }
@@ -4121,6 +4133,33 @@ fcntl(int fd, int cmd, ...)
     }
 }
 
+/* License: Ruby's */
+int
+rb_w32_set_nonblock(int fd)
+{
+    SOCKET sock = TO_SOCKET(fd);
+    if (is_socket(sock)) {
+	return setfl(sock, O_NONBLOCK);
+    }
+    else if (is_pipe(sock)) {
+	DWORD state;
+	if (!GetNamedPipeHandleState((HANDLE)sock, &state, NULL, NULL, NULL, NULL, 0)) {
+	    errno = map_errno(GetLastError());
+	    return -1;
+	}
+	state |= PIPE_NOWAIT;
+	if (!SetNamedPipeHandleState((HANDLE)sock, &state, NULL, NULL)) {
+	    errno = map_errno(GetLastError());
+	    return -1;
+	}
+	return 0;
+    }
+    else {
+	errno = EBADF;
+	return -1;
+    }
+}
+
 #ifndef WNOHANG
 #define WNOHANG -1
 #endif
@@ -4784,6 +4823,8 @@ rb_w32_fstat(int fd, struct stat *st)
     if (ret) return ret;
 #ifdef __BORLANDC__
     st->st_mode &= ~(S_IWGRP | S_IWOTH);
+#else
+    if (GetEnvironmentVariableW(L"TZ", NULL, 0) == 0 && GetLastError() == ERROR_ENVVAR_NOT_FOUND) return ret;
 #endif
     if (GetFileInformationByHandle((HANDLE)_get_osfhandle(fd), &info)) {
 #ifdef __BORLANDC__
@@ -4804,7 +4845,12 @@ rb_w32_fstati64(int fd, struct stati64 *st)
 {
     BY_HANDLE_FILE_INFORMATION info;
     struct stat tmp;
-    int ret = fstat(fd, &tmp);
+    int ret;
+
+#ifndef __BORLANDC__
+    if (GetEnvironmentVariableW(L"TZ", NULL, 0) == 0 && GetLastError() == ERROR_ENVVAR_NOT_FOUND) return _fstati64(fd, st);
+#endif
+    ret = fstat(fd, &tmp);
 
     if (ret) return ret;
 #ifdef __BORLANDC__
@@ -5914,7 +5960,7 @@ constat_reset(HANDLE h)
 {
     st_data_t data;
     struct constat *p;
-    if (!conlist) return;
+    if (!conlist || conlist == conlist_disabled) return;
     if (!st_lookup(conlist, (st_data_t)h, &data)) return;
     p = (struct constat *)data;
     p->vt100.state = constat_init;
@@ -6353,7 +6399,18 @@ rb_w32_read(int fd, void *buf, size_t size)
 
     if (!ReadFile((HANDLE)_osfhnd(fd), buf, len, &read, pol)) {
 	err = GetLastError();
-	if (err != ERROR_IO_PENDING) {
+	if (err == ERROR_NO_DATA && (_osfile(fd) & FPIPE)) {
+	    DWORD state;
+	    if (GetNamedPipeHandleState((HANDLE)_osfhnd(fd), &state, NULL, NULL, NULL, NULL, 0) && (state & PIPE_NOWAIT)) {
+		errno = EWOULDBLOCK;
+	    }
+	    else {
+		errno = map_errno(err);
+	    }
+	    MTHREAD_ONLY(LeaveCriticalSection(&_pioinfo(fd)->lock));
+	    return -1;
+	}
+	else if (err != ERROR_IO_PENDING) {
 	    if (pol) CloseHandle(ol.hEvent);
 	    if (err == ERROR_ACCESS_DENIED)
 		errno = EBADF;
@@ -6458,6 +6515,7 @@ rb_w32_write(int fd, const void *buf, size_t size)
     /* get rid of console writing bug */
     len = (_osfile(fd) & FDEV) ? min(32 * 1024, size) : size;
     size -= len;
+  retry2:
 
     /* if have cancel_io, use Overlapped I/O */
     if (cancel_io) {
@@ -6497,7 +6555,7 @@ rb_w32_write(int fd, const void *buf, size_t size)
 
 	    if (!GetOverlappedResult((HANDLE)_osfhnd(fd), &ol, &written,
 				     TRUE)) {
-		errno = map_errno(err);
+		errno = map_errno(GetLastError());
 		CloseHandle(ol.hEvent);
 		cancel_io((HANDLE)_osfhnd(fd));
 		MTHREAD_ONLY(LeaveCriticalSection(&_pioinfo(fd)->lock));
@@ -6515,6 +6573,16 @@ rb_w32_write(int fd, const void *buf, size_t size)
 	buf = (const char *)buf + len;
 	if (size > 0)
 	    goto retry;
+    }
+    if (ret == 0) {
+	size_t newlen = len / 2;
+	if (newlen > 0) {
+	    size += len - newlen;
+	    len = newlen;
+	    goto retry2;
+	}
+	ret = -1;
+	errno = EWOULDBLOCK;
     }
 
     MTHREAD_ONLY(LeaveCriticalSection(&_pioinfo(fd)->lock));

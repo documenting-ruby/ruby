@@ -11,8 +11,6 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
-#include "ruby/encoding.h"
 #include "internal.h"
 
 #include <sys/types.h>
@@ -381,7 +379,7 @@ dir_memsize(const void *ptr)
 static const rb_data_type_t dir_data_type = {
     "dir",
     {dir_mark, dir_free, dir_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 static VALUE dir_close(VALUE);

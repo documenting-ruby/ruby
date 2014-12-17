@@ -234,10 +234,12 @@ VALUE rb_enumeratorize_with_size(VALUE, VALUE, int, const VALUE *, rb_enumerator
 #define rb_enumeratorize_with_size(obj, id, argc, argv, size_fn) \
     rb_enumeratorize_with_size(obj, id, argc, argv, (rb_enumerator_size_func *)(size_fn))
 #endif
+#define SIZED_ENUMERATOR(obj, argc, argv, size_fn) \
+    rb_enumeratorize_with_size((obj), ID2SYM(rb_frame_this_func()), \
+			       (argc), (argv), (size_fn))
 #define RETURN_SIZED_ENUMERATOR(obj, argc, argv, size_fn) do {		\
 	if (!rb_block_given_p())					\
-	    return rb_enumeratorize_with_size((obj), ID2SYM(rb_frame_this_func()),\
-				    (argc), (argv), (size_fn));		\
+	    return SIZED_ENUMERATOR(obj, argc, argv, size_fn);		\
     } while (0)
 #define RETURN_ENUMERATOR(obj, argc, argv) RETURN_SIZED_ENUMERATOR(obj, argc, argv, 0)
 /* error.c */
@@ -371,14 +373,24 @@ VALUE rb_f_exit(int, const VALUE*);
 VALUE rb_f_abort(int, const VALUE*);
 void rb_remove_method(VALUE, const char*);
 void rb_remove_method_id(VALUE, ID);
-#define rb_disable_super(klass, name) ((void)0)
-#define rb_enable_super(klass, name) ((void)0)
+DEPRECATED(static inline void rb_disable_super(void));
+DEPRECATED(static inline void rb_enable_super(void));
+static inline void rb_disable_super(void)
+{
+    /* obsolete - no use */
+}
+static inline void rb_enable_super(void)
+{
+    rb_warning("rb_enable_super() is obsolete");
+}
+#define rb_disable_super(klass, name) rb_disable_super()
+#define rb_enable_super(klass, name) rb_enable_super()
 #define HAVE_RB_DEFINE_ALLOC_FUNC 1
 typedef VALUE (*rb_alloc_func_t)(VALUE);
 void rb_define_alloc_func(VALUE, rb_alloc_func_t);
 void rb_undef_alloc_func(VALUE);
 rb_alloc_func_t rb_get_alloc_func(VALUE);
-void rb_clear_cache(void);
+DEPRECATED(void rb_clear_cache(void));
 void rb_clear_constant_cache(void);
 void rb_clear_method_cache_by_class(VALUE);
 void rb_alias(VALUE, ID, ID);

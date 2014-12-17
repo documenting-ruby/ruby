@@ -11,17 +11,15 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
+#include "internal.h"
 #include "ruby/st.h"
 #include "ruby/util.h"
-#include "ruby/encoding.h"
 #include <stdio.h>
 #include <errno.h>
 #include <ctype.h>
 #include <math.h>
 #include <float.h>
 #include "constant.h"
-#include "internal.h"
 #include "id.h"
 #include "probes.h"
 
@@ -157,14 +155,13 @@ rb_obj_equal(VALUE obj1, VALUE obj2)
  * capacity of a Fixnum will be truncated before being used.
  *
  * The hash value for an object may not be identical across invocations or
- * implementations of ruby.  If you need a stable identifier across ruby
+ * implementations of Ruby.  If you need a stable identifier across Ruby
  * invocations and implementations you will need to generate one with a custom
  * method.
  */
 VALUE
 rb_obj_hash(VALUE obj)
 {
-    long rb_objid_hash(st_index_t index);
     VALUE oid = rb_obj_id(obj);
 #if SIZEOF_LONG == SIZEOF_VOIDP
     st_index_t index = NUM2LONG(oid);
@@ -236,7 +233,7 @@ rb_obj_class(VALUE obj)
  *     obj.singleton_class    -> class
  *
  *  Returns the singleton class of <i>obj</i>.  This method creates
- *  a new singleton class if <i>obj</i> does not have it.
+ *  a new singleton class if <i>obj</i> does not have one.
  *
  *  If <i>obj</i> is <code>nil</code>, <code>true</code>, or
  *  <code>false</code>, it returns NilClass, TrueClass, or FalseClass,
@@ -281,8 +278,6 @@ rb_obj_copy_ivar(VALUE dest, VALUE obj)
     }
 }
 
-void rb_copy_wb_protected_attribute(VALUE dest, VALUE obj);
-
 static void
 init_copy(VALUE dest, VALUE obj)
 {
@@ -304,9 +299,9 @@ init_copy(VALUE dest, VALUE obj)
  *     obj.clone -> an_object
  *
  *  Produces a shallow copy of <i>obj</i>---the instance variables of
- *  <i>obj</i> are copied, but not the objects they reference. Copies
- *  the frozen and tainted state of <i>obj</i>. See also the discussion
- *  under <code>Object#dup</code>.
+ *  <i>obj</i> are copied, but not the objects they reference.
+ *  <code>clone</code> copies the frozen and tainted state of <i>obj</i>.
+ *  See also the discussion under <code>Object#dup</code>.
  *
  *     class Klass
  *        attr_accessor :str
@@ -354,8 +349,8 @@ rb_obj_clone(VALUE obj)
  *     obj.dup -> an_object
  *
  *  Produces a shallow copy of <i>obj</i>---the instance variables of
- *  <i>obj</i> are copied, but not the objects they reference. <code>dup</code>
- *  copies the tainted state of <i>obj</i>.
+ *  <i>obj</i> are copied, but not the objects they reference.
+ *  <code>dup</code> copies the tainted state of <i>obj</i>.
  *
  *  This method may have class-specific behavior.  If so, that
  *  behavior will be documented under the #+initialize_copy+ method of
@@ -369,7 +364,7 @@ rb_obj_clone(VALUE obj)
  *  typically uses the class of the descendant object to create the new
  *  instance.
  *
- *  When using #dup any modules that the object has been extended with will not
+ *  When using #dup, any modules that the object has been extended with will not
  *  be copied.
  *
  *	class Klass
@@ -452,7 +447,7 @@ rb_obj_init_dup_clone(VALUE obj, VALUE orig)
  *  Returns a string representing <i>obj</i>. The default
  *  <code>to_s</code> prints the object's class and an encoding of the
  *  object id. As a special case, the top-level object that is the
- *  initial execution context of Ruby programs returns ``main.''
+ *  initial execution context of Ruby programs returns ``main''.
  */
 
 VALUE
@@ -469,7 +464,7 @@ rb_any_to_s(VALUE obj)
 
 /*
  * If the default external encoding is ASCII compatible, the encoding of
- * inspected result must be compatible with it.
+ * the inspected result must be compatible with it.
  * If the default external encoding is ASCII incompatible,
  * the result must be ASCII only.
  */
@@ -494,8 +489,6 @@ inspect_i(st_data_t k, st_data_t v, st_data_t a)
     ID id = (ID)k;
     VALUE value = (VALUE)v;
     VALUE str = (VALUE)a;
-    VALUE str2;
-    const char *ivname;
 
     /* need not to show internal data */
     if (CLASS_OF(value) == 0) return ST_CONTINUE;
@@ -507,12 +500,8 @@ inspect_i(st_data_t k, st_data_t v, st_data_t a)
     else {
 	rb_str_cat2(str, ", ");
     }
-    ivname = rb_id2name(id);
-    rb_str_cat2(str, ivname);
-    rb_str_cat2(str, "=");
-    str2 = rb_inspect(value);
-    rb_str_append(str, str2);
-    OBJ_INFECT(str, str2);
+    rb_str_catf(str, "%"PRIsVALUE"=%+"PRIsVALUE,
+		rb_id2str(id), value);
 
     return ST_CONTINUE;
 }
@@ -538,9 +527,10 @@ inspect_obj(VALUE obj, VALUE str, int recur)
  *     obj.inspect   -> string
  *
  * Returns a string containing a human-readable representation of <i>obj</i>.
- * By default, show the class name and the list of the instance variables and
+ * The default <code>inspect</code> shows the object's class name,
+ * an encoding of the object id, and a list of the instance variables and
  * their values (by calling #inspect on each of them).
- * User defined classes should override this method to make better
+ * User defined classes should override this method to provide a better
  * representation of <i>obj</i>.  When overriding this method, it should
  * return a string whose encoding is compatible with the default external
  * encoding.
@@ -558,13 +548,6 @@ inspect_obj(VALUE obj, VALUE str, int recur)
  *       end
  *     end
  *     Bar.new.inspect                  #=> "#<Bar:0x0300c868 @bar=1>"
- *
- *     class Baz
- *       def to_s
- *         "baz"
- *       end
- *     end
- *     Baz.new.inspect                  #=> "#<Baz:0x0300c868>"
  */
 
 static VALUE
@@ -687,14 +670,14 @@ rb_class_search_ancestor(VALUE cl, VALUE c)
  *  call-seq:
  *     obj.tap{|x|...}    -> obj
  *
- *  Yields <code>x</code> to the block, and then returns <code>x</code>.
+ *  Yields self to the block, and then returns self.
  *  The primary purpose of this method is to "tap into" a method chain,
  *  in order to perform operations on intermediate results within the chain.
  *
  *	(1..10)                .tap {|x| puts "original: #{x.inspect}"}
  *	  .to_a                .tap {|x| puts "array: #{x.inspect}"}
  *	  .select {|x| x%2==0} .tap {|x| puts "evens: #{x.inspect}"}
- *	  .map { |x| x*x }     .tap {|x| puts "squares: #{x.inspect}"}
+ *	  .map {|x| x*x}       .tap {|x| puts "squares: #{x.inspect}"}
  *
  */
 
@@ -728,7 +711,7 @@ rb_obj_tap(VALUE obj)
  *    class Baz < Bar
  *    end
  *
- * produces:
+ * <em>produces:</em>
  *
  *    New subclass: Bar
  *    New subclass: Baz
@@ -750,7 +733,7 @@ rb_obj_tap(VALUE obj)
  *     def some_instance_method() end
  *   end
  *
- * produces:
+ * <em>produces:</em>
  *
  *   Adding :some_instance_method
  *
@@ -776,7 +759,7 @@ rb_obj_tap(VALUE obj)
  *     remove_method :some_instance_method
  *   end
  *
- * produces:
+ * <em>produces:</em>
  *
  *   Removing :some_instance_method
  *
@@ -964,13 +947,13 @@ rb_obj_tainted(VALUE obj)
  *
  *  Objects that are marked as tainted will be restricted from various built-in
  *  methods. This is to prevent insecure data, such as command-line arguments
- *  or strings read from Kernel#gets, from inadvertently compromising the users
+ *  or strings read from Kernel#gets, from inadvertently compromising the user's
  *  system.
  *
- *  To check whether an object is tainted, use #tainted?
+ *  To check whether an object is tainted, use #tainted?.
  *
  *  You should only untaint a tainted object if your code has inspected it and
- *  determined that it is safe. To do so use #untaint
+ *  determined that it is safe. To do so use #untaint.
  *
  *  In $SAFE level 3, all newly created objects are tainted and you can't untaint
  *  objects.
@@ -1249,7 +1232,7 @@ true_and(VALUE obj, VALUE obj2)
  *  call-seq:
  *     true | obj   -> true
  *
- *  Or---Returns <code>true</code>. As <i>anObject</i> is an argument to
+ *  Or---Returns <code>true</code>. As <i>obj</i> is an argument to
  *  a method call, it is always evaluated; there is no short-circuit
  *  evaluation in this case.
  *
@@ -1373,10 +1356,12 @@ rb_true(VALUE obj)
 
 /*
  * call-seq:
- *   nil.nil?               -> true
- *   <anything_else>.nil?   -> false
+ *   obj.nil?               -> true or false
  *
  * Only the object <i>nil</i> responds <code>true</code> to <code>nil?</code>.
+ *
+ *    Object.new.nil?   #=> false
+ *    nil.nil?          #=> true
  */
 
 
@@ -1453,7 +1438,7 @@ rb_obj_cmp(VALUE obj1, VALUE obj2)
  *  Instance methods appear as methods in a class when the module is
  *  included, module methods do not. Conversely, module methods may be
  *  called without creating an encapsulating object, while instance
- *  methods may not. (See <code>Module#module_function</code>)
+ *  methods may not. (See <code>Module#module_function</code>.)
  *
  *  In the descriptions that follow, the parameter <i>sym</i> refers
  *  to a symbol, which is either a quoted string or a
@@ -1476,7 +1461,7 @@ rb_obj_cmp(VALUE obj1, VALUE obj2)
  * call-seq:
  *   mod.to_s   -> string
  *
- * Return a string representing this module or class. For basic
+ * Returns a string representing this module or class. For basic
  * classes and modules, this is the name. For singletons, we
  * show information on the thing we're attached to as well.
  */
@@ -1536,7 +1521,7 @@ rb_mod_freeze(VALUE mod)
  *  call-seq:
  *     mod === obj    -> true or false
  *
- *  Case Equality---Returns <code>true</code> if <i>anObject</i> is an
+ *  Case Equality---Returns <code>true</code> if <i>obj</i> is an
  *  instance of <i>mod</i> or one of <i>mod</i>'s descendants. Of
  *  limited use for modules, but can be used in <code>case</code>
  *  statements to classify objects by class.
@@ -1556,7 +1541,7 @@ rb_mod_eqq(VALUE mod, VALUE arg)
  * is the same as <i>other</i>. Returns
  * <code>nil</code> if there's no relationship between the two.
  * (Think of the relationship in terms of the class definition:
- * "class A<B" implies "A<B").
+ * "class A<B" implies "A<B".)
  *
  */
 
@@ -1587,7 +1572,7 @@ rb_class_inherited_p(VALUE mod, VALUE arg)
  * Returns true if <i>mod</i> is a subclass of <i>other</i>. Returns
  * <code>nil</code> if there's no relationship between the two.
  * (Think of the relationship in terms of the class definition:
- * "class A<B" implies "A<B").
+ * "class A<B" implies "A<B".)
  *
  */
 
@@ -1607,7 +1592,7 @@ rb_mod_lt(VALUE mod, VALUE arg)
  * two modules are the same. Returns
  * <code>nil</code> if there's no relationship between the two.
  * (Think of the relationship in terms of the class definition:
- * "class A<B" implies "B>A").
+ * "class A<B" implies "B>A".)
  *
  */
 
@@ -1628,7 +1613,7 @@ rb_mod_ge(VALUE mod, VALUE arg)
  * Returns true if <i>mod</i> is an ancestor of <i>other</i>. Returns
  * <code>nil</code> if there's no relationship between the two.
  * (Think of the relationship in terms of the class definition:
- * "class A<B" implies "B>A").
+ * "class A<B" implies "B>A".)
  *
  */
 
@@ -1886,7 +1871,7 @@ rb_class_new_instance(int argc, const VALUE *argv, VALUE klass)
  *     class Bar < Foo; end
  *     Bar.superclass           #=> Foo
  *
- *  returns nil when the given class hasn't a parent class:
+ *  Returns nil when the given class does not have a parent class:
  *
  *     BasicObject.superclass   #=> nil
  *
@@ -1917,28 +1902,28 @@ rb_class_get_superclass(VALUE klass)
 }
 
 #define id_for_setter(name, type, message) \
-    check_setter_id(name, rb_is_##type##_id, rb_is_##type##_name, message)
+    check_setter_id(name, rb_is_##type##_sym, rb_is_##type##_name, message)
 static ID
-check_setter_id(VALUE name, int (*valid_id_p)(ID), int (*valid_name_p)(VALUE),
+check_setter_id(VALUE name, int (*valid_sym_p)(VALUE), int (*valid_name_p)(VALUE),
 		const char *message)
 {
     ID id;
     if (SYMBOL_P(name)) {
-	id = SYM2ID(name);
-	if (!valid_id_p(id)) {
-	    rb_name_error(id, message, QUOTE_ID(id));
+	if (!valid_sym_p(name)) {
+	    rb_name_error_str(name, message, QUOTE(rb_sym2str(name)));
 	}
+	id = SYM2ID(name);
     }
     else {
 	VALUE str = rb_check_string_type(name);
 	if (NIL_P(str)) {
-	    rb_raise(rb_eTypeError, "%+"PRIsVALUE" is not a symbol or string",
-		     str);
+	    rb_raise(rb_eTypeError, "% "PRIsVALUE" is not a symbol or string",
+		     name);
 	}
 	if (!valid_name_p(str)) {
 	    rb_name_error_str(str, message, QUOTE(str));
 	}
-	id = rb_to_id(str);
+	id = rb_intern_str(str);
     }
     return id;
 }
@@ -1953,6 +1938,12 @@ static int
 rb_is_attr_name(VALUE name)
 {
     return rb_is_local_name(name) || rb_is_const_name(name);
+}
+
+static int
+rb_is_attr_sym(VALUE sym)
+{
+    return rb_is_local_sym(sym) || rb_is_const_sym(sym);
 }
 
 static const char invalid_attribute_name[] = "invalid attribute name `%"PRIsVALUE"'";
@@ -2061,9 +2052,9 @@ rb_mod_attr_accessor(int argc, VALUE *argv, VALUE klass)
  *     mod.const_get(sym, inherit=true)    -> obj
  *     mod.const_get(str, inherit=true)    -> obj
  *
- *  Checks for a constant with the given name in <i>mod</i>
+ *  Checks for a constant with the given name in <i>mod</i>.
  *  If +inherit+ is set, the lookup will also search
- *  the ancestors (and +Object+ if <i>mod</i> is a +Module+.)
+ *  the ancestors (and +Object+ if <i>mod</i> is a +Module+).
  *
  *  The value of the constant is returned if a definition is found,
  *  otherwise a +NameError+ is raised.
@@ -2089,7 +2080,7 @@ rb_mod_attr_accessor(int argc, VALUE *argv, VALUE klass)
  *     Object.const_get 'Foo::Baz::VAL'         # => 10
  *     Object.const_get 'Foo::Baz::VAL', false  # => NameError
  *
- *  If neither +sym+ nor +str+ is not a valid constant name a NameError will be
+ *  If the argument is not a valid constant name a +NameError+ will be
  *  raised with a warning "wrong constant name".
  *
  *	Object.const_get 'foobar' #=> NameError: wrong constant name foobar
@@ -2104,17 +2095,14 @@ rb_mod_const_get(int argc, VALUE *argv, VALUE mod)
     const char *pbeg, *p, *path, *pend;
     ID id;
 
-    if (argc == 1) {
-	name = argv[0];
-	recur = Qtrue;
-    }
-    else {
-	rb_scan_args(argc, argv, "11", &name, &recur);
-    }
+    rb_check_arity(argc, 1, 2);
+    name = argv[0];
+    recur = (argc == 1) ? Qtrue : argv[1];
 
     if (SYMBOL_P(name)) {
-	id = SYM2ID(name);
-	if (!rb_is_const_id(id)) goto wrong_id;
+	if (!rb_is_const_sym(name)) goto wrong_name;
+	id = rb_check_id(&name);
+	if (!id) return rb_const_missing(mod, name);
 	return RTEST(recur) ? rb_const_get(mod, id) : rb_const_get_at(mod, id);
     }
 
@@ -2130,8 +2118,7 @@ rb_mod_const_get(int argc, VALUE *argv, VALUE mod)
 
     if (p >= pend || !*p) {
       wrong_name:
-	rb_raise(rb_eNameError, "wrong constant name %"PRIsVALUE,
-		 QUOTE(name));
+	rb_name_error_str(name, "wrong constant name % "PRIsVALUE, name);
     }
 
     if (p + 2 < pend && p[0] == ':' && p[1] == ':') {
@@ -2170,16 +2157,17 @@ rb_mod_const_get(int argc, VALUE *argv, VALUE mod)
 				  QUOTE(part));
 	    }
 	    else if (!rb_method_basic_definition_p(CLASS_OF(mod), id_const_missing)) {
-		id = rb_intern_str(part);
+		part = rb_str_intern(part);
+		mod = rb_const_missing(mod, part);
+		continue;
 	    }
 	    else {
-		rb_name_error_str(part, "uninitialized constant %"PRIsVALUE"%"PRIsVALUE,
+		rb_name_error_str(part, "uninitialized constant %"PRIsVALUE"% "PRIsVALUE,
 				  rb_str_subseq(name, 0, beglen),
-				  QUOTE(part));
+				  part);
 	    }
 	}
 	if (!rb_is_const_id(id)) {
-	  wrong_id:
 	    rb_name_error(id, "wrong constant name %"PRIsVALUE,
 			  QUOTE_ID(id));
 	}
@@ -2201,7 +2189,7 @@ rb_mod_const_get(int argc, VALUE *argv, VALUE mod)
  *     Math.const_set("HIGH_SCHOOL_PI", 22.0/7.0)   #=> 3.14285714285714
  *     Math::HIGH_SCHOOL_PI - Math::PI              #=> 0.00126448926734968
  *
- *  If neither +sym+ nor +str+ is not a valid constant name a NameError will be
+ *  If +sym+ or +str+ is not a valid constant name a +NameError+ will be
  *  raised with a warning "wrong constant name".
  *
  *	Object.const_set('foobar', 42) #=> NameError: wrong constant name foobar
@@ -2221,20 +2209,39 @@ rb_mod_const_set(VALUE mod, VALUE name, VALUE value)
  *     mod.const_defined?(sym, inherit=true)   -> true or false
  *     mod.const_defined?(str, inherit=true)   -> true or false
  *
- *  Checks for a constant with the given name in <i>mod</i>
- *  If +inherit+ is set, the lookup will also search
- *  the ancestors (and +Object+ if <i>mod</i> is a +Module+.)
+ *  Says whether _mod_ or its ancestors have a constant with the given name:
  *
- *  Returns whether or not a definition is found:
+ *    Float.const_defined?(:EPSILON)      #=> true, found in Float itself
+ *    Float.const_defined?("String")      #=> true, found in Object (ancestor)
+ *    BasicObject.const_defined?(:Hash)   #=> false
  *
- *     Math.const_defined? "PI"   #=> true
- *     IO.const_defined? :SYNC   #=> true
- *     IO.const_defined? :SYNC, false   #=> false
+ *  If _mod_ is a +Module+, additionally +Object+ and its ancestors are checked:
  *
- *  If neither +sym+ nor +str+ is not a valid constant name a NameError will be
- *  raised with a warning "wrong constant name".
+ *    Math.const_defined?(:String)   #=> true, found in Object
  *
- *	Hash.const_defined? 'foobar' #=> NameError: wrong constant name foobar
+ *  In each of the checked classes or modules, if the constant is not present
+ *  but there is an autoload for it, +true+ is returned directly without
+ *  autoloading:
+ *
+ *    module Admin
+ *      autoload :User, 'admin/user'
+ *    end
+ *    Admin.const_defined?(:User)   #=> true
+ *
+ *  If the constant is not found the callback +const_missing+ is *not* called
+ *  and the method returns +false+.
+ *
+ *  If +inherit+ is false, the lookup only checks the constants in the receiver:
+ *
+ *    IO.const_defined?(:SYNC)          #=> true, found in File::Constants (ancestor)
+ *    IO.const_defined?(:SYNC, false)   #=> false, not found in IO itself
+ *
+ *  In this case, the same logic for autoloading applies.
+ *
+ *  If the argument is not a valid constant name a +NameError+ is raised with the
+ *  message "wrong constant name _name_":
+ *
+ *    Hash.const_defined? 'foobar'   #=> NameError: wrong constant name foobar
  *
  */
 
@@ -2246,17 +2253,14 @@ rb_mod_const_defined(int argc, VALUE *argv, VALUE mod)
     const char *pbeg, *p, *path, *pend;
     ID id;
 
-    if (argc == 1) {
-	name = argv[0];
-	recur = Qtrue;
-    }
-    else {
-	rb_scan_args(argc, argv, "11", &name, &recur);
-    }
+    rb_check_arity(argc, 1, 2);
+    name = argv[0];
+    recur = (argc == 1) ? Qtrue : argv[1];
 
     if (SYMBOL_P(name)) {
-	id = SYM2ID(name);
-	if (!rb_is_const_id(id)) goto wrong_id;
+	if (!rb_is_const_sym(name)) goto wrong_name;
+	id = rb_check_id(&name);
+	if (!id) return Qfalse;
 	return RTEST(recur) ? rb_const_defined(mod, id) : rb_const_defined_at(mod, id);
     }
 
@@ -2272,8 +2276,7 @@ rb_mod_const_defined(int argc, VALUE *argv, VALUE mod)
 
     if (p >= pend || !*p) {
       wrong_name:
-	rb_raise(rb_eNameError, "wrong constant name %"PRIsVALUE,
-		 QUOTE(name));
+	rb_name_error_str(name, "wrong constant name % "PRIsVALUE, name);
     }
 
     if (p + 2 < pend && p[0] == ':' && p[1] == ':') {
@@ -2311,7 +2314,6 @@ rb_mod_const_defined(int argc, VALUE *argv, VALUE mod)
 	    }
 	}
 	if (!rb_is_const_id(id)) {
-	  wrong_id:
 	    rb_name_error(id, "wrong constant name %"PRIsVALUE,
 			  QUOTE_ID(id));
 	}
@@ -2384,10 +2386,10 @@ rb_obj_ivar_get(VALUE obj, VALUE iv)
  *     obj.instance_variable_set(symbol, obj)    -> obj
  *     obj.instance_variable_set(string, obj)    -> obj
  *
- *  Sets the instance variable names by <i>symbol</i> to
- *  <i>object</i>, thereby frustrating the efforts of the class's
+ *  Sets the instance variable named by <i>symbol</i> to the given
+ *  object, thereby frustrating the efforts of the class's
  *  author to attempt to provide proper encapsulation. The variable
- *  did not have to exist prior to this call.
+ *  does not have to exist prior to this call.
  *  If the instance variable name is passed as a string, that string
  *  is converted to a symbol.
  *
@@ -2457,7 +2459,7 @@ rb_obj_ivar_defined(VALUE obj, VALUE iv)
  *
  *  Returns the value of the given class variable (or throws a
  *  <code>NameError</code> exception). The <code>@@</code> part of the
- *  variable name should be included for regular class variables
+ *  variable name should be included for regular class variables.
  *  String arguments are converted to symbols.
  *
  *     class Fred
@@ -2493,8 +2495,8 @@ rb_mod_cvar_get(VALUE obj, VALUE iv)
  *     obj.class_variable_set(symbol, obj)    -> obj
  *     obj.class_variable_set(string, obj)    -> obj
  *
- *  Sets the class variable names by <i>symbol</i> to
- *  <i>object</i>.
+ *  Sets the class variable named by <i>symbol</i> to the given
+ *  object.
  *  If the class variable name is passed as a string, that string
  *  is converted to a symbol.
  *
@@ -2760,18 +2762,18 @@ rb_Integer(VALUE val)
 
 /*
  *  call-seq:
- *     Integer(arg,base=0)    -> integer
+ *     Integer(arg, base=0)    -> integer
  *
  *  Converts <i>arg</i> to a <code>Fixnum</code> or <code>Bignum</code>.
  *  Numeric types are converted directly (with floating point numbers
- *  being truncated).    <i>base</i> (0, or between 2 and 36) is a base for
+ *  being truncated).  <i>base</i> (0, or between 2 and 36) is a base for
  *  integer string representation.  If <i>arg</i> is a <code>String</code>,
- *  when <i>base</i> is omitted or equals to zero, radix indicators
+ *  when <i>base</i> is omitted or equals zero, radix indicators
  *  (<code>0</code>, <code>0b</code>, and <code>0x</code>) are honored.
  *  In any case, strings should be strictly conformed to numeric
  *  representation. This behavior is different from that of
- *  <code>String#to_i</code>.  Non string values will be converted using
- *  <code>to_int</code>, and <code>to_i</code>. Passing <code>nil</code>
+ *  <code>String#to_i</code>.  Non string values will be converted by first
+ *  trying <code>to_int</code>, then <code>to_i</code>. Passing <code>nil</code>
  *  raises a TypeError.
  *
  *     Integer(123.999)    #=> 123
@@ -2945,8 +2947,8 @@ rb_Float(VALUE val)
  *     Float(arg)    -> float
  *
  *  Returns <i>arg</i> converted to a float. Numeric types are converted
- *  directly, the rest are converted using <i>arg</i>.to_f. As of Ruby
- *  1.8, converting <code>nil</code> generates a <code>TypeError</code>.
+ *  directly, the rest are converted using <i>arg</i>.to_f.
+ *  Converting <code>nil</code> generates a <code>TypeError</code>.
  *
  *     Float(1)           #=> 1.0
  *     Float("123.456")   #=> 123.456
@@ -3018,8 +3020,9 @@ rb_String(VALUE val)
  *  call-seq:
  *     String(arg)   -> string
  *
- *  Converts <i>arg</i> to a <code>String</code> by calling its
- *  <code>to_s</code> method.
+ *  Returns <i>arg</i> as a <code>String</code>.
+ *
+ *  First tries to call its <code>to_str</code> method, then its <code>to_s</code> method.
  *
  *     String(self)        #=> "main"
  *     String(self.class)  #=> "Object"
@@ -3052,7 +3055,7 @@ rb_Array(VALUE val)
  *
  *  Returns +arg+ as an Array.
  *
- *  First tries to call Array#to_ary on +arg+, then Array#to_a.
+ *  First tries to call <code>to_ary</code> on +arg+, then <code>to_a</code>.
  *
  *     Array(1..5)   #=> [1, 2, 3, 4, 5]
  */
@@ -3107,7 +3110,7 @@ rb_f_hash(VALUE obj, VALUE arg)
  *  Typically, you create a new class by using:
  *
  *    class Name
- *     # some class describing the class behavior
+ *     # some code describing the class behavior
  *    end
  *
  *  When a new class is created, an object of type Class is initialized and
@@ -3119,19 +3122,17 @@ rb_f_hash(VALUE obj, VALUE arg)
  *  <code>Class</code>:
  *
  *     class Class
- *        alias oldNew  new
- *        def new(*args)
- *          print "Creating a new ", self.name, "\n"
- *          oldNew(*args)
- *        end
- *      end
+ *       alias old_new new
+ *       def new(*args)
+ *         print "Creating a new ", self.name, "\n"
+ *         old_new(*args)
+ *       end
+ *     end
  *
+ *     class Name
+ *     end
  *
- *      class Name
- *      end
- *
- *
- *      n = Name.new
+ *     n = Name.new
  *
  *  <em>produces:</em>
  *
@@ -3139,7 +3140,7 @@ rb_f_hash(VALUE obj, VALUE arg)
  *
  *  Classes, modules, and objects are interrelated. In the diagram
  *  that follows, the vertical arrows represent inheritance, and the
- *  parentheses meta-classes. All metaclasses are instances
+ *  parentheses metaclasses. All metaclasses are instances
  *  of the class `Class'.
  *                             +---------+             +-...
  *                             |         |             |
@@ -3200,7 +3201,7 @@ rb_f_hash(VALUE obj, VALUE arg)
  *
  *  BasicObject does not include Kernel (for methods like +puts+) and
  *  BasicObject is outside of the namespace of the standard library so common
- *  classes will not be found without a using a full class path.
+ *  classes will not be found without using a full class path.
  *
  *  A variety of strategies can be used to provide useful portions of the
  *  standard library to subclasses of BasicObject.  A subclass could
@@ -3238,7 +3239,7 @@ rb_f_hash(VALUE obj, VALUE arg)
  *
  *  Object is the default root of all Ruby objects.  Object inherits from
  *  BasicObject which allows creating alternate object hierarchies.  Methods
- *  on object are available to all classes unless explicitly overridden.
+ *  on Object are available to all classes unless explicitly overridden.
  *
  *  Object mixes in the Kernel module, making the built-in kernel functions
  *  globally accessible.  Although the instance methods of Object are defined

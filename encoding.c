@@ -9,8 +9,6 @@
 
 **********************************************************************/
 
-#include "ruby/ruby.h"
-#include "ruby/encoding.h"
 #include "internal.h"
 #include "regenc.h"
 #include <ctype.h>
@@ -71,16 +69,10 @@ void rb_enc_init(void);
 
 static int load_encoding(const char *name);
 
-static size_t
-enc_memsize(const void *p)
-{
-    return 0;
-}
-
 static const rb_data_type_t encoding_data_type = {
     "encoding",
-    {0, 0, enc_memsize,},
-    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+    {0, 0, 0,},
+    0, 0, RUBY_TYPED_FREE_IMMEDIATELY
 };
 
 #define is_data_encoding(obj) (RTYPEDDATA_P(obj) && RTYPEDDATA_TYPE(obj) == &encoding_data_type)
@@ -579,9 +571,6 @@ rb_encdb_set_unicode(int index)
     ((rb_raw_encoding *)rb_enc_from_index(index))->flags |= ONIGENC_FLAG_UNICODE;
 }
 
-extern rb_encoding OnigEncodingUTF_8;
-extern rb_encoding OnigEncodingUS_ASCII;
-
 void
 rb_enc_init(void)
 {
@@ -640,13 +629,6 @@ rb_enc_registered(const char *name)
     return -1;
 }
 
-static VALUE
-require_enc(VALUE enclib)
-{
-    int safe = rb_safe_level();
-    return rb_require_safe(enclib, safe > 3 ? 3 : safe);
-}
-
 static int
 load_encoding(const char *name)
 {
@@ -654,8 +636,8 @@ load_encoding(const char *name)
     VALUE verbose = ruby_verbose;
     VALUE debug = ruby_debug;
     VALUE errinfo;
-    VALUE loaded;
     char *s = RSTRING_PTR(enclib) + 4, *e = RSTRING_END(enclib) - 3;
+    int loaded;
     int idx;
 
     while (s < e) {
@@ -668,11 +650,11 @@ load_encoding(const char *name)
     ruby_verbose = Qfalse;
     ruby_debug = Qfalse;
     errinfo = rb_errinfo();
-    loaded = rb_protect(require_enc, enclib, 0);
+    loaded = rb_require_internal(enclib, rb_safe_level());
     ruby_verbose = verbose;
     ruby_debug = debug;
     rb_set_errinfo(errinfo);
-    if (NIL_P(loaded)) return -1;
+    if (loaded < 0 || 1 < loaded) return -1;
     if ((idx = rb_enc_registered(name)) < 0) return -1;
     if (enc_autoload_p(enc_table.list[idx].enc)) return -1;
     return idx;
@@ -1342,8 +1324,6 @@ struct default_encoding {
 
 static struct default_encoding default_external = {0};
 
-extern int Init_enc_set_filesystem_encoding(void);
-
 static int
 enc_set_default_encoding(struct default_encoding *def, VALUE encoding, const char *name)
 {
@@ -1560,9 +1540,6 @@ set_default_internal(VALUE klass, VALUE encoding)
  * Encoding.find("locale") can be used.
  *
  */
-VALUE
-rb_locale_charmap(VALUE klass);
-
 static void
 set_encoding_const(const char *name, rb_encoding *enc)
 {

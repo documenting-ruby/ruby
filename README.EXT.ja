@@ -230,8 +230,9 @@ rb_vsprintf(const char *format, va_list ap)
   Cの文字列formatと続く引数をprintf(3)のフォーマットにしたがって
   整形し，Rubyの文字列を生成する．
 
-  注意: %iはObject#to_s('+'フラグが指定されているときはObject#inspect)を
-  使ったVALUEの出力に使用されているため，整数には%dを使用すること．
+  注意: "%"PRIsVALUEがObject#to_s('+'フラグが指定されている
+  ときはObject#inspect)を使ったVALUEの出力に利用できる．これ
+  は"%i"と衝突するため，整数には"%d"を使用すること．
 
 rb_str_cat(VALUE str, const char *ptr, long len)
 
@@ -471,6 +472,17 @@ funcはクラスを引数として受け取って，新しく割り当てられ�
 スタンスを返さなくてはなりません．このインスタンスは，外部リ
 ソースなどを含まない，できるだけ「空」のままにしておいたほう
 がよいでしょう．
+
+継承したクラスにある既存のメソッドをオーバーライドしているな
+ら，オーバーライドされたメソッドを呼び出すには以下の関数を使
+います．
+
+  VALUE rb_call_super(int argc, const VALUE *argv)
+
+現在のスコープのレシーバは(他に方法がなければ)，以下の関数で
+得ることができます．
+
+  VALUE rb_current_receiver(void)
 
 === 定数定義
 
@@ -1295,6 +1307,25 @@ rb_scan_args(int argc, VALUE *argv, const char *fmt, ...) ::
   返り値は与えられた引数の数です．オプションハッシュおよびイ
   テレータブロックは数えません．
 
+int rb_get_kwargs(VALUE keyword_hash, const ID *table, int required, int optional, VALUE *values)
+
+  キーワードで指定された値をtableにしたがって取り出します．
+  tableの最初のrequired個のIDは必須キーワードを表し，続く
+  optional (optionalが負の場合は-optional-1) 個のIDは省略可能
+  キーワードです．必須キーワードがkeyword_hash中にない場合，
+  "missing keyword"ArgumentErrorが発生します．省略可能キーワー
+  ドがない場合は，values中の対応する要素は変更されません．
+  keyword_hashに使用されない要素がある場合は，optionalが負なら
+  新しいHashとして省略可能引数の次に保存されますが，そうでなけ
+  れば"unknown keyword"ArgumentErrorが発生します．
+
+VALUE rb_extract_keywords(VALUE *original_hash)
+
+  original_hashで参照されるHashオブジェクトから，Symbolである
+  キーとその値を新しいHashに取り出します．original_hashの指す
+  先には，元のHashがSymbol以外のキーを含んでいた場合はそれらが
+  コピーされた別の新しいHash，そうでなければ0が保存されます．
+
 == Rubyメソッド呼び出し
 
 VALUE rb_funcall(VALUE recv, ID mid, int narg, ...) ::
@@ -1438,8 +1469,9 @@ void rb_bug(const char *fmt, ...) ::
   状況の時呼ぶ．インタープリタはコアダンプし直ちに終了する．
   例外処理は一切行なわれない．
 
-注意: %iはObject#to_s('+'フラグが指定されているときはObject#inspect)を
-使ったVALUEの出力に使用されているため，整数には%dを使用すること．
+注意: "%"PRIsVALUEがObject#to_s('+'フラグが指定されていると
+きはObject#inspect)を使ったVALUEの出力に利用できる．これは
+"%i"と衝突するため，整数には"%d"を使用すること．
 
 == Rubyの初期化・実行
 

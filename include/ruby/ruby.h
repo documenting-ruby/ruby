@@ -123,20 +123,21 @@ typedef char ruby_check_sizeof_voidp[SIZEOF_VOIDP == sizeof(void*) ? 1 : -1];
 #define PRI_64_PREFIX PRI_LL_PREFIX
 #endif
 
+#define RUBY_PRI_VALUE_MARK "\v"
 #if defined PRIdPTR && !defined PRI_VALUE_PREFIX
 #define PRIdVALUE PRIdPTR
 #define PRIoVALUE PRIoPTR
 #define PRIuVALUE PRIuPTR
 #define PRIxVALUE PRIxPTR
 #define PRIXVALUE PRIXPTR
-#define PRIsVALUE PRIiPTR
+#define PRIsVALUE PRIiPTR""RUBY_PRI_VALUE_MARK
 #else
 #define PRIdVALUE PRI_VALUE_PREFIX"d"
 #define PRIoVALUE PRI_VALUE_PREFIX"o"
 #define PRIuVALUE PRI_VALUE_PREFIX"u"
 #define PRIxVALUE PRI_VALUE_PREFIX"x"
 #define PRIXVALUE PRI_VALUE_PREFIX"X"
-#define PRIsVALUE PRI_VALUE_PREFIX"i"
+#define PRIsVALUE PRI_VALUE_PREFIX"i"RUBY_PRI_VALUE_MARK
 #endif
 #ifndef PRI_VALUE_PREFIX
 # define PRI_VALUE_PREFIX ""
@@ -487,6 +488,18 @@ enum ruby_value_type {
 
 static inline int rb_type(VALUE obj);
 #define TYPE(x) rb_type((VALUE)(x))
+
+#define RB_FLOAT_TYPE_P(obj) (FLONUM_P(obj) || (!SPECIAL_CONST_P(obj) && BUILTIN_TYPE(obj) == T_FLOAT))
+
+#define RB_TYPE_P(obj, type) ( \
+	((type) == T_FIXNUM) ? FIXNUM_P(obj) : \
+	((type) == T_TRUE) ? ((obj) == Qtrue) : \
+	((type) == T_FALSE) ? ((obj) == Qfalse) : \
+	((type) == T_NIL) ? ((obj) == Qnil) : \
+	((type) == T_UNDEF) ? ((obj) == Qundef) : \
+	((type) == T_SYMBOL) ? SYMBOL_P(obj) : \
+	((type) == T_FLOAT) ? RB_FLOAT_TYPE_P(obj) : \
+	(!SPECIAL_CONST_P(obj) && BUILTIN_TYPE(obj) == (type)))
 
 /* RB_GC_GUARD_PTR() is an intermediate macro, and has no effect by
  * itself.  don't use it directly */
@@ -960,7 +973,7 @@ struct rb_data_type_struct {
 	void *reserved[2]; /* For future extension.
 			      This array *must* be filled with ZERO. */
     } function;
-    const rb_data_type_t *parent;
+    void *const reserved;
     void *data;        /* This area can be used for any purpose
                           by a programmer who define the type. */
     VALUE flags;       /* FL_WB_PROTECTED */
@@ -968,7 +981,6 @@ struct rb_data_type_struct {
 
 #define HAVE_TYPE_RB_DATA_TYPE_T 1
 #define HAVE_RB_DATA_TYPE_T_FUNCTION 1
-#define HAVE_RB_DATA_TYPE_T_PARENT 1
 
 struct RTypedData {
     struct RBasic basic;
@@ -997,7 +1009,6 @@ typedef void (*RUBY_DATA_FUNC)(void*);
 #endif
 VALUE rb_data_object_alloc(VALUE,void*,RUBY_DATA_FUNC,RUBY_DATA_FUNC);
 VALUE rb_data_typed_object_alloc(VALUE klass, void *datap, const rb_data_type_t *);
-int rb_typeddata_inherited_p(const rb_data_type_t *child, const rb_data_type_t *parent);
 int rb_typeddata_is_kind_of(VALUE, const rb_data_type_t *);
 void *rb_check_typeddata(VALUE, const rb_data_type_t *);
 #define Check_TypedStruct(v,t) rb_check_typeddata((VALUE)(v),(t))
@@ -1008,7 +1019,8 @@ void *rb_check_typeddata(VALUE, const rb_data_type_t *);
 
 /* bits for rb_data_type_struct::flags */
 #define RUBY_TYPED_FREE_IMMEDIATELY  1 /* TYPE field */
-#define RUBY_TYPED_WB_PROTECTED      FL_WB_PROTECTED
+#define RUBY_TYPED_WB_PROTECTED      FL_WB_PROTECTED /* THIS FLAG DEPENDS ON Ruby version */
+#define RUBY_TYPED_PROMOTED1         FL_PROMOTED1    /* THIS FLAG DEPENDS ON Ruby version */
 
 #define Data_Wrap_Struct(klass,mark,free,sval)\
     rb_data_object_alloc((klass),(sval),(RUBY_DATA_FUNC)(mark),(RUBY_DATA_FUNC)(free))
@@ -1161,6 +1173,15 @@ rb_data_object_alloc_warning(VALUE klass, void *ptr, RUBY_DATA_FUNC mark, RUBY_D
 {
     return rb_data_object_alloc(klass, ptr, mark, free);
 }
+
+#if defined(HAVE_BUILTIN___BUILTIN_CHOOSE_EXPR_CONSTANT_P)
+#define rb_data_object_alloc_warning(klass, ptr, mark, free) \
+    __extension__( \
+	__builtin_choose_expr( \
+	    __builtin_constant_p(klass) && !(klass), \
+	    rb_data_object_alloc(klass, ptr, mark, free), \
+	    rb_data_object_alloc_warning(klass, ptr, mark, free)))
+#endif
 
 static inline void *
 rb_data_object_get(VALUE obj)
@@ -1318,7 +1339,7 @@ rb_ulong2num_inline(unsigned long v)
 static inline char
 rb_num2char_inline(VALUE x)
 {
-    if ((TYPE(x) == T_STRING) && (RSTRING_LEN(x)>=1))
+    if (RB_TYPE_P(x, T_STRING) && (RSTRING_LEN(x)>=1))
 	return RSTRING_PTR(x)[0];
     else
 	return (char)(NUM2INT(x) & 0xff);
@@ -1461,6 +1482,9 @@ VALUE rb_funcall_passing_block(VALUE, ID, int, const VALUE*);
 VALUE rb_funcall_with_block(VALUE, ID, int, const VALUE*, VALUE);
 int rb_scan_args(int, const VALUE*, const char*, ...);
 VALUE rb_call_super(int, const VALUE*);
+VALUE rb_current_receiver(void);
+int rb_get_kwargs(VALUE keyword_hash, const ID *table, int required, int optional, VALUE *);
+VALUE rb_extract_keywords(VALUE *orighash);
 
 /* rb_scan_args() format allows ':' for optional hash */
 #define HAVE_RB_SCAN_ARGS_OPTIONAL_HASH 1
@@ -1660,18 +1684,6 @@ rb_type(VALUE obj)
     }
     return BUILTIN_TYPE(obj);
 }
-
-#define RB_FLOAT_TYPE_P(obj) (FLONUM_P(obj) || (!SPECIAL_CONST_P(obj) && BUILTIN_TYPE(obj) == T_FLOAT))
-
-#define RB_TYPE_P(obj, type) ( \
-	((type) == T_FIXNUM) ? FIXNUM_P(obj) : \
-	((type) == T_TRUE) ? ((obj) == Qtrue) : \
-	((type) == T_FALSE) ? ((obj) == Qfalse) : \
-	((type) == T_NIL) ? ((obj) == Qnil) : \
-	((type) == T_UNDEF) ? ((obj) == Qundef) : \
-	((type) == T_SYMBOL) ? SYMBOL_P(obj) : \
-        ((type) == T_FLOAT) ? RB_FLOAT_TYPE_P(obj) : \
-	(!SPECIAL_CONST_P(obj) && BUILTIN_TYPE(obj) == (type)))
 
 #ifdef __GNUC__
 #define rb_type_p(obj, type) \

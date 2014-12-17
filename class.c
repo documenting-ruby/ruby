@@ -23,16 +23,12 @@
  * \{
  */
 
-#include "ruby/ruby.h"
+#include "internal.h"
 #include "ruby/st.h"
 #include "method.h"
 #include "constant.h"
 #include "vm_core.h"
-#include "internal.h"
 #include <ctype.h>
-
-int rb_vm_add_root_module(ID id, VALUE module);
-
 
 #define id_attached id__attached__
 
@@ -154,7 +150,7 @@ rb_class_detach_module_subclasses(VALUE klass)
 static VALUE
 class_alloc(VALUE flags, VALUE klass)
 {
-    NEWOBJ_OF(obj, struct RClass, klass, (flags & T_MASK) | (RGENGC_WB_PROTECTED_CLASS ? FL_WB_PROTECTED : 0));
+    NEWOBJ_OF(obj, struct RClass, klass, (flags & T_MASK) | FL_PROMOTED1 /* start from age == 2 */ | (RGENGC_WB_PROTECTED_CLASS ? FL_WB_PROTECTED : 0));
     obj->ptr = ALLOC(rb_classext_t);
     RCLASS_IV_TBL(obj) = 0;
     RCLASS_CONST_TBL(obj) = 0;
@@ -703,16 +699,16 @@ rb_define_class_id_under(VALUE outer, ID id, VALUE super)
     if (rb_const_defined_at(outer, id)) {
 	klass = rb_const_get_at(outer, id);
 	if (!RB_TYPE_P(klass, T_CLASS)) {
-	    rb_raise(rb_eTypeError, "%s is not a class", rb_id2name(id));
+	    rb_raise(rb_eTypeError, "%"PRIsVALUE" is not a class", rb_id2str(id));
 	}
 	if (rb_class_real(RCLASS_SUPER(klass)) != super) {
-	    rb_name_error(id, "%s is already defined", rb_id2name(id));
+	    rb_name_error(id, "%"PRIsVALUE" is already defined", rb_id2str(id));
 	}
 	return klass;
     }
     if (!super) {
-	rb_warn("no super class for `%s::%s', Object assumed",
-		rb_class2name(outer), rb_id2name(id));
+	rb_warn("no super class for `%"PRIsVALUE"::%"PRIsVALUE"', Object assumed",
+		rb_class_path(outer), rb_id2str(id));
     }
     klass = rb_define_class_id(id, super);
     rb_set_class_path_string(klass, outer, rb_id2str(id));
@@ -940,7 +936,6 @@ move_refined_method(st_data_t key, st_data_t value, st_data_t data)
 void
 rb_prepend_module(VALUE klass, VALUE module)
 {
-    void rb_vm_check_redefinition_by_prepend(VALUE klass);
     VALUE origin;
     int changed = 0;
 
@@ -1862,11 +1857,12 @@ rb_scan_args(int argc, const VALUE *argv, const char *fmt, ...)
     return argc;
 }
 
-NORETURN(static void keyword_error(const char *error, VALUE keys));
-static void
-keyword_error(const char *error, VALUE keys)
+VALUE
+rb_keyword_error_new(const char *error, VALUE keys)
 {
     const char *msg = "";
+    VALUE error_message;
+
     if (RARRAY_LEN(keys) == 1) {
 	keys = RARRAY_AREF(keys, 0);
     }
@@ -1874,21 +1870,33 @@ keyword_error(const char *error, VALUE keys)
 	keys = rb_ary_join(keys, rb_usascii_str_new2(", "));
 	msg = "s";
     }
-    rb_raise(rb_eArgError, "%s keyword%s: %"PRIsVALUE, error, msg, keys);
+
+    error_message = rb_sprintf("%s keyword%s: %"PRIsVALUE, error, msg, keys);
+
+    return rb_exc_new_str(rb_eArgError, error_message);
+}
+
+NORETURN(static void rb_keyword_error(const char *error, VALUE keys));
+static void
+rb_keyword_error(const char *error, VALUE keys)
+{
+    rb_exc_raise(rb_keyword_error_new(error, keys));
 }
 
 NORETURN(static void unknown_keyword_error(VALUE hash, const ID *table, int keywords));
 static void
 unknown_keyword_error(VALUE hash, const ID *table, int keywords)
 {
+    st_table *tbl = rb_hash_tbl_raw(hash);
     VALUE keys;
     int i;
     for (i = 0; i < keywords; i++) {
-	rb_hash_delete(hash, ID2SYM(table[i]));
+	st_data_t key = ID2SYM(table[i]);
+	st_delete(tbl, &key, NULL);
     }
     keys = rb_funcall(hash, rb_intern("keys"), 0, 0);
     if (!RB_TYPE_P(keys, T_ARRAY)) rb_raise(rb_eArgError, "unknown keyword");
-    keyword_error("unknown", keys);
+    rb_keyword_error("unknown", keys);
 }
 
 static int
@@ -1955,7 +1963,7 @@ rb_get_kwargs(VALUE keyword_hash, const ID *table, int required, int optional, V
 	    rb_ary_push(missing, keyword);
 	}
 	if (!NIL_P(missing)) {
-	    keyword_error("missing", missing);
+	    rb_keyword_error("missing", missing);
 	}
     }
     j = i;

@@ -11,12 +11,11 @@
 
 **********************************************************************/
 
+#include "internal.h"
 #include "eval_intern.h"
 #include "iseq.h"
 #include "gc.h"
 #include "ruby/vm.h"
-#include "ruby/encoding.h"
-#include "internal.h"
 #include "vm_core.h"
 #include "probes_helper.h"
 
@@ -510,7 +509,6 @@ setup_exception(rb_thread_t *th, int tag, volatile VALUE mesg, VALUE cause)
 	    if (NIL_P(rb_attr_get(mesg, idBt))) {
 		at = rb_vm_backtrace_object();
 		if (mesg == sysstack_error) {
-		    VALUE ruby_vm_sysstack_error_copy(void);
 		    mesg = ruby_vm_sysstack_error_copy();
 		}
 		rb_ivar_set(mesg, idBt, at);
@@ -689,7 +687,6 @@ static VALUE
 make_exception(int argc, const VALUE *argv, int isstr)
 {
     VALUE mesg, exc;
-    ID exception;
     int n;
 
     mesg = Qnil;
@@ -716,8 +713,7 @@ make_exception(int argc, const VALUE *argv, int isstr)
 	n = 1;
       exception_call:
 	if (sysstack_error_p(exc)) return exc;
-	CONST_ID(exception, "exception");
-	mesg = rb_check_funcall(exc, exception, n, argv+1);
+	mesg = rb_check_funcall(exc, idException, n, argv+1);
 	if (mesg == Qundef) {
 	    rb_raise(rb_eTypeError, "exception class/object expected");
 	}
@@ -911,8 +907,6 @@ rb_ensure(VALUE (*b_proc)(ANYARGS), VALUE data1, VALUE (*e_proc)(ANYARGS), VALUE
 	result = (*b_proc) (data1);
     }
     POP_TAG();
-    /* TODO: fix me */
-    /* retval = prot_tag ? prot_tag->retval : Qnil; */     /* save retval */
     errinfo = th->errinfo;
     th->ensure_list=ensure_list.next;
     (*ensure_list.entry.e_proc)(ensure_list.entry.data2);
@@ -1034,6 +1028,19 @@ prev_frame_func(void)
     rb_control_frame_t *prev_cfp = previous_frame(GET_THREAD());
     if (!prev_cfp) return 0;
     return frame_func_id(prev_cfp);
+}
+
+ID
+rb_frame_last_func(void)
+{
+    rb_thread_t *th = GET_THREAD();
+    rb_control_frame_t *cfp = th->cfp;
+    ID mid;
+
+    while (!(mid = frame_func_id(cfp)) &&
+	   (cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp),
+	    !RUBY_VM_CONTROL_FRAME_STACK_OVERFLOW_P(th, cfp)));
+    return mid;
 }
 
 /*
@@ -1268,8 +1275,6 @@ add_activated_refinement(VALUE activated_refinements,
     }
     rb_hash_aset(activated_refinements, klass, iclass);
 }
-
-VALUE rb_yield_refine_block(VALUE refinement, VALUE refinements);
 
 /*
  *  call-seq:
