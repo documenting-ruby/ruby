@@ -2222,6 +2222,11 @@ rb_hash_invert_i(VALUE key, VALUE value, VALUE hash)
  *     h = { "n" => 100, "m" => 100, "y" => 300, "d" => 200, "a" => 0 }
  *     h.invert   #=> {0=>"a", 100=>"m", 200=>"d", 300=>"y"}
  *
+ *  Note: when you invert a hash that has multiple keys pointing to the same
+ *  value, #invert will silently drop one of the keys.
+ *
+ *      h = { '#ff0000' => 'red', '#f00' => 'red' }
+ *      h.invert   #=> {"red"=>"#f00"}
  */
 
 static VALUE
