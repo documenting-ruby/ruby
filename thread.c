@@ -2161,6 +2161,11 @@ rb_thread_fd_close(int fd)
  *  Raises an exception from the given thread. The caller does not have to be
  *  +thr+. See Kernel#raise for more information.
  *
+ *  Raising an arbitrary exception in a thread is an unsafe operation. This
+ *  can raise an exception that the target thread is unprepared to handle, for
+ *  instance in a `rescue` block or in other code that would otherwise never
+ *  raise exceptions.
+ *
  *     Thread.abort_on_exception = true
  *     a = Thread.new { sleep(200) }
  *     a.raise("Gotcha")
