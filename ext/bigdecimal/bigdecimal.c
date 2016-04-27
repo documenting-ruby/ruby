@@ -931,7 +931,7 @@ BigDecimal_add(VALUE self, VALUE r)
   * If +b+ is a Float, the precision of the result is Float::DIG+1.
   *
   * If +b+ is a BigDecimal, the precision of the result is +b+'s precision of
-  * internal representation from platform. So, it's return value is platform
+  * internal representation from platform. So, its return value is platform
   * dependent.
   *
   */

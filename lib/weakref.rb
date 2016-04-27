@@ -18,7 +18,7 @@ require "delegate"
 #
 # With help from WeakRef, we can implement our own rudimentary WeakHash class.
 #
-# We will call it WeakHash, since it's really just a Hash except all of it's
+# We will call it WeakHash, since it's really just a Hash except all of its
 # keys and values can be garbage collected.
 #
 #     require 'weakref'

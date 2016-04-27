@@ -1357,7 +1357,7 @@ class Gem::Specification < Gem::BasicSpecification
 
   ##
   # Activate this spec, registering it as a loaded spec and adding
-  # it's lib paths to $LOAD_PATH. Returns true if the spec was
+  # its lib paths to $LOAD_PATH. Returns true if the spec was
   # activated, false if it was previously activated. Freaks out if
   # there are conflicts upon activation.
 

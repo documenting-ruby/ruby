@@ -145,7 +145,7 @@ end
 #
 # This time RubyGems will accept your signed package and begin installing.
 #
-# While you're waiting for RubyGems to work it's magic, have a look at some of
+# While you're waiting for RubyGems to work its magic, have a look at some of
 # the other security commands by running <code>gem help cert</code>:
 #
 #   Options:
