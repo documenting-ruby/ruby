@@ -307,7 +307,7 @@ module URI
   # == Description
   # Returns a Regexp object which matches to URI-like strings.
   # The Regexp object returned by this method includes arbitrary
-  # number of capture group (parentheses).  Never rely on it's number.
+  # number of capture group (parentheses).  Never rely on its number.
   #
   # == Usage
   #

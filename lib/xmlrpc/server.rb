@@ -71,7 +71,7 @@ class BasicServer
   #
   # Parameters +signature+ and +help+ are used by the Introspection method if
   # specified, where +signature+ is either an Array containing strings each
-  # representing a type of it's signature (the first is the return value) or
+  # representing a type of its signature (the first is the return value) or
   # an Array of Arrays if the method has multiple signatures.
   #
   # Value type-names are "int, boolean, double, string, dateTime.iso8601,

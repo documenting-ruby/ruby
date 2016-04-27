@@ -289,7 +289,7 @@ static VALUE mSyslog_set_mask(VALUE self, VALUE mask)
  * LOG_INFO::    Informational message
  * LOG_DEBUG::   Debugging information
  *
- * Each priority level also has a shortcut method that logs with it's named priority.
+ * Each priority level also has a shortcut method that logs with its named priority.
  * As an example, the two following statements would produce the same result:
  *
  *   Syslog.log(Syslog::LOG_ALERT, "Out of memory")
