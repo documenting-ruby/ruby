@@ -4922,7 +4922,7 @@ time_load(VALUE klass, VALUE str)
  *
  *    t.year #=> 1993
  *
- *  Was is daylight savings at the time?
+ *  Was it daylight savings at the time?
  *
  *    t.dst? #=> false
  *
