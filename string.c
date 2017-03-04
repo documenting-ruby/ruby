@@ -4995,10 +4995,12 @@ rb_str_include(VALUE str, VALUE arg)
  *     str.to_i(base=10)   -> integer
  *
  *  Returns the result of interpreting leading characters in <i>str</i> as an
- *  integer base <i>base</i> (between 2 and 36). Extraneous characters past the
- *  end of a valid number are ignored. If there is not a valid number at the
- *  start of <i>str</i>, <code>0</code> is returned. This method never raises an
- *  exception when <i>base</i> is valid.
+ *  integer base <i>base</i> (either 0 or between 2 and 36). If a base of 0 is
+ *  passed, radix indicators ('0b', '0o', '0d', '0x') at the beginning of the
+ *  string will be honored. Extraneous characters past the end of a valid number
+ *  are ignored. If there is not a valid number at the start of <i>str</i>,
+ *  <code>0</code> is returned. This method never raises an exception when
+ *  <i>base</i> is valid.
  *
  *     "12345".to_i             #=> 12345
  *     "99 red balloons".to_i   #=> 99
