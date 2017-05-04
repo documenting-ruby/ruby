@@ -3439,7 +3439,7 @@ rb_io_readlines(int argc, VALUE *argv, VALUE io)
  *  If no block is given, an enumerator is returned instead.
  *
  *     f = File.new("testfile")
- *     f.each {|line| puts "#{f.lineno}: #{line}" }
+ *     f.each_line {|line| puts "#{f.lineno}: #{line}" }
  *
  *  <em>produces:</em>
  *
