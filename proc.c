@@ -1644,6 +1644,7 @@ rb_mod_public_instance_method(VALUE mod, VALUE vid)
  *         self.class.send(:define_method, name, &block)
  *       end
  *       define_method(:wilma) { puts "Charge it!" }
+ *       define_method(:greet) { |name| puts "Hi #{name}!" }
  *     end
  *     class B < A
  *       define_method(:barney, instance_method(:fred))
@@ -1651,6 +1652,7 @@ rb_mod_public_instance_method(VALUE mod, VALUE vid)
  *     a = B.new
  *     a.barney
  *     a.wilma
+ *     a.greet('wilma')
  *     a.create_method(:betty) { p self }
  *     a.betty
  *
