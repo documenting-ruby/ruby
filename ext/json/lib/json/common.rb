@@ -134,6 +134,7 @@ module JSON
   module_function
 
   # Parse the JSON document _source_ into a Ruby data structure and return it.
+  # It raises JSON::ParserError if it fails to parse.
   #
   # _opts_ can have the following
   # keys:
@@ -158,6 +159,7 @@ module JSON
   # Parse the JSON document _source_ into a Ruby data structure and return it.
   # The bang version of the parse method defaults to the more dangerous values
   # for the _opts_ hash, so be sure only to parse trusted _source_ documents.
+  # It raises JSON::ParserError if it fails to parse.
   #
   # _opts_ can have the following keys:
   # * *max_nesting*: The maximum depth of nesting allowed in the parsed data
