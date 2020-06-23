@@ -821,6 +821,7 @@ static VALUE cParser_parse_quirks_mode(VALUE self)
  *
  *  Parses the current JSON text _source_ and returns the complete data
  *  structure as a result.
+ *  It raises JSON::ParseError if fail to parse.
  */
 static VALUE cParser_parse(VALUE self)
 {
