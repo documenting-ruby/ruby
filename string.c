@@ -1481,6 +1481,9 @@ rb_str_strlen(VALUE str)
  *     str.size     -> integer
  *
  *  Returns the character length of <i>str</i>.
+ *
+ *    "hello".length       #=> 5
+ *    "12 34".length       #=> 5
  */
 
 VALUE
